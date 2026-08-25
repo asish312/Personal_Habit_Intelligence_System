@@ -1,0 +1,296 @@
+Personal Habit Intelligence System
+A free and fully automated system that captures daily habit data from an iPhone, stores it in Google Sheets, generates an AI daily review, sends a phone notification, and answers questions about past behavior on demand.
+
+Goal
+Capture daily life and habit data with almost no effort, keep a clean history, compute the few metrics that actually change behavior, generate a short AI review each day, and make the whole history queryable in natural language.
+
+Architecture Overview
+The iPhone captures data through a Shortcut that reads Apple Health values automatically and asks for a few manual inputs. The Shortcut sends one JSON payload per day to a Google Apps Script web app. Apps Script appends the day as a single row in a Google Sheet. A daily time trigger then computes analytics, calls a hosted language model to produce a short review, writes that review back to the Sheet, and pushes a phone notification when a value crosses a threshold. The same Apps Script web app can also answer questions sent from the phone by retrieving relevant past days and calling the language model.
+
+Components
+iPhone Shortcut for daily capture.
+Google Apps Script web app as the engine and scheduler.
+Google Sheet with three tabs named RAW, ANALYTICS, and MEMORY.
+A hosted language model API for the daily review and for answering questions.
+A push notification service such as Pushover or Pushcut.
+An optional hosted vector database, added later only if semantic search is needed.
+Storage Layout
+The Google Sheet has three tabs with clear responsibilities.
+
+RAW is the source of truth. It is append only, one row per day, and is never edited by hand. Every captured value goes here.
+
+ANALYTICS is computed from RAW using sheet formulas and Apps Script. It holds completion rate, streaks, rolling averages, week over week changes, and the strongest correlation. Nothing here is typed by the user.
+
+MEMORY holds the AI generated daily review text, the AI scores, and tags. It is the layer used for retrieval when answering questions.
+
+Data Model
+Each day is a single flat row in RAW. Derived values such as rates, streaks, averages, and AI scores are never typed. They are computed in ANALYTICS and MEMORY. A day is valid even if only the Tier 1 fields are filled.
+
+Tier 1, captured from day one
+These are high value and low effort. Most come automatically from Apple Health, with one quick subjective input.
+
+date, the key for every record.
+sleep_hours, the strongest driver of focus and mood, from Health.
+bedtime, the time sleep started, from Health, needed for bedtime consistency questions.
+wake_time, the time of waking, from Health, used with bedtime to measure sleep timing.
+resting_hr, a daily recovery signal, from Health.
+hrv, an early stress and recovery indicator, from Health.
+steps, a movement proxy, from Health.
+exercise_min, captures workouts that steps alone miss, from Health.
+weight, a slow trend value, from Health.
+screen_min, the biggest lever for focus, entered or read where possible.
+habits_done and habits_total, the core measure of showing up, from a Shortcut tap.
+habits_missed, a short list of the habit names not completed that day, needed to answer which habits are missed most often.
+discipline, a one to five subjective anchor, from one tap.
+day_type, weekday or weekend, derived from the date so off days are not compared unfairly against work days.
+Tier 2, added after two or three weeks of consistency
+These are added once Tier 1 entry is a stable habit.
+
+water_l, daily water intake.
+mood, one to five.
+energy, one to five.
+deep_work, one to five.
+exercise_time, the time of day exercise happened, used to study whether morning exercise changes focus.
+caffeine, number of servings.
+alcohol, number of servings.
+biggest_win, a short line of text.
+biggest_blocker, a short line of text.
+meals_raw, compact meal text.
+tags, a short list of words such as travel, deadline, or sick.
+Targets such as a sleep goal, a steps goal, and a water goal are not stored per day. They live once in a separate CONFIG tab so that questions like whether a target was hit can compare the day against the goal without repeating the goal in every row.
+
+Tier 3, optional and AI estimated
+These are not typed. The language model estimates them from the meal text and other fields.
+
+Per app screen breakdown.
+Meal macros such as calories, protein, and fiber.
+Meal text format
+Meals are stored as compact lines, one meal per line, with fields separated by a vertical bar in the order meal type, time, description, serving, and estimated calories.
+
+Breakfast|08:30|egg omelet with one toast|medium|250
+Lunch|13:00|rice, dal, and salad|large|600
+AI generated fields
+These live in MEMORY and are produced by the language model, never typed.
+
+summary_text, a short narrative of the day.
+wins and misses.
+one_line_reality_check.
+discipline_score, health_score, and focus_score.
+estimated calories and a protein signal.
+Implementation Logic
+Each part below describes the logic as a checklist of steps to build.
+
+Capture on the phone
+ Create a Shortcut that reads sleep_hours, bedtime, wake_time, resting_hr, hrv, steps, exercise_min, and weight from Apple Health.
+ Prompt for screen_min, habits_done, habits_total, the names of any missed habits, and discipline.
+ Build a single dictionary with all Tier 1 fields and the current date.
+ Send the dictionary as JSON in a POST request to the Apps Script web app URL.
+ Schedule the Shortcut to run each night, or trigger it manually before bed.
+Ingest into RAW
+ Define a fixed list of column names in the order they appear in RAW.
+ In doPost, parse the JSON body into an object.
+ Map each column name to its value, using an empty value when a field is missing.
+ Append the mapped values as one new row in RAW.
+ Return a small JSON response confirming success.
+Compute analytics
+ Read the newest RAW row as an object.
+ Compute completion rate as habits_done divided by habits_total.
+ Compute the current streak by counting consecutive days that meet a threshold.
+ Compute seven day rolling averages for sleep, steps, screen, and discipline.
+ Compute week over week change for the same values.
+ Compute the strongest correlation between an input and an outcome score, grouped by day_type so weekdays and weekends are compared fairly.
+ Write all computed values into the ANALYTICS tab.
+Generate the AI review
+ Build a prompt that includes the day object and the computed stats.
+ Ask the language model to return JSON with summary_text, wins, misses, one_line_reality_check, discipline_score, health_score, focus_score, and estimated calories.
+ Call the hosted language model API from Apps Script.
+ Parse the JSON response.
+ Append the review into the MEMORY tab next to the date.
+Send a notification
+ Decide a message only when a value crosses a threshold, for example discipline below five, a broken streak, or a new personal best.
+ When there is no message, do nothing.
+ When there is a message, send it through the push service so it appears on the phone.
+Answer questions on demand
+ Let doPost detect a question field in the incoming request.
+ Retrieve the few most relevant past days, first by filtering on scores and tags in the Sheet.
+ Build a small context from the retrieved summary_text values.
+ Call the language model with the question and the small context.
+ Return the answer for the Shortcut to display or speak.
+Schedule everything
+ Create a time based trigger that runs the daily job once each morning.
+ The daily job reads the latest day, computes analytics, generates the review, and sends the notification in sequence.
+Implementation Examples
+A daily JSON payload sent from the phone.
+
+{
+  "date": "2026-06-25",
+  "sleep_hours": 6.4,
+  "resting_hr": 58,
+  "hrv": 42,
+  "steps": 8200,
+  "exercise_min": 30,
+  "weight": 74.1,
+  "screen_min": 310,
+  "habits_done": 5,
+  "habits_total": 7,
+  "discipline": 3
+}
+Apps Script that receives the payload and appends a row.
+
+const COLS = ["date","sleep_hours","resting_hr","hrv","steps","exercise_min",
+  "weight","screen_min","habits_done","habits_total","discipline","day_type"];
+
+function doPost(e) {
+  const data = JSON.parse(e.postData.contents);
+  if (data.question) {
+    return reply(answerQuestion(data.question));
+  }
+  const sheet = SpreadsheetApp.getActive().getSheetByName("RAW");
+  sheet.appendRow(COLS.map(c => data[c] ?? ""));
+  return reply({ ok: true });
+}
+
+function reply(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+A daily job wired to a time trigger.
+
+function runDailyJob() {
+  const day = getLatestRawRow();
+  const stats = computeAnalytics(day);
+  const review = callLLM(day, stats);
+  appendToMemory(day.date, review);
+  maybeNotify(review, stats);
+}
+
+function setupTrigger() {
+  ScriptApp.newTrigger("runDailyJob").timeBased().atHour(6).everyDays(1).create();
+}
+Analytics That Matter
+Compute only the metrics that can change behavior and avoid numbers that add no insight.
+
+Completion rate shows whether you are showing up.
+Current streak shows momentum.
+Seven day rolling averages separate a real trend from daily noise.
+Week over week change answers whether you are improving.
+The strongest correlation is the most valuable output because it points to the one lever worth pulling, for example that sleep under six hours tends to drop discipline sharply. Use day_type and tags so sick days and weekends do not distort the result.
+Supported Queries
+Status questions.
+
+What happened today?
+What is my current streak?
+What is my completion rate today, this week, and this month?
+How many hours did I sleep last night compared to my average?
+How much screen time did I have today compared to my seven day average?
+What is my latest weight and how has it changed this month?
+Did I hit my sleep, steps, and water targets today?
+How many days this month did I complete every habit?
+Trend questions.
+
+How was this week compared to last week?
+What is the trend in sleep, steps, hydration, and weight?
+Is my discipline trending up or down over the last thirty days?
+How consistent has my bedtime been this week?
+Which day of the week is usually my best and my worst?
+Is my screen time increasing or decreasing month over month?
+Has my resting heart rate improved over the last month?
+Is my weekly exercise time going up?
+Pattern and correlation questions.
+
+Which habits do I miss most often?
+What patterns show up on low discipline days?
+Which blockers are most linked to low focus?
+Which meal patterns line up with better days?
+How does last night sleep affect today discipline and deep work?
+Does high screen time predict lower completion the same day or the next day?
+What is the single strongest correlation in my data right now?
+Do days with alcohol show worse sleep the next night?
+Does morning exercise change my focus for the rest of the day?
+Memory and similar day questions.
+
+Which past days are most similar to today?
+Show me days with high discipline and low screen time.
+Find days with low sleep and poor deep work.
+Find earlier days with the same blocker I had today.
+What did I do on my best days last month?
+Have I been in a slump like this before, and what pulled me out of it?
+When did my last long streak happen and what was different then?
+Planning and coaching questions.
+
+What is the one thing I should change tomorrow?
+Based on my history, how do I recover from a low sleep day?
+Which single fix would most improve my scores?
+Set a realistic target for next week based on recent trends.
+What should I be careful about today given how this week is going?
+What is a small habit I could add that fits my current routine?
+Notification trigger questions.
+
+Is my streak at risk today?
+Did any score cross a warning threshold today?
+Is today a new personal best for any metric?
+Is my screen time today far above my normal range?
+Did my sleep drop below my safe level last night?
+Future AI and Scalability
+These additions turn the system from a fixed daily script into a scalable and dynamic assistant. They keep the same free and automated foundation, and they plug into the existing Apps Script broker without changing the core flow.
+
+Agent with tools
+Instead of a fixed pipeline, expose a small set of actions to the language model and let it decide which to use for each request. The model reads the question, picks the right actions, chains them, and answers. New capability means adding one more action rather than rewriting the flow.
+
+ Define actions such as get a day, get a trend, find similar days, set a goal, and send a notification.
+ Describe each action to the model so it can call them by name with arguments.
+ Let the model plan, call actions, read results, and produce the final answer.
+ Add new abilities over time by registering new actions only.
+Tiered memory for long histories
+As years of data build up, no single context can hold every day. Compress memory in layers so retrieval always stays small and fast.
+
+ Keep daily summaries as the base layer.
+ Run a weekly job that compresses seven daily summaries into one weekly memory.
+ Run a monthly job that compresses weeks into a monthly memory, and a yearly job above that.
+ When answering, read the layer that matches the question scope rather than every day.
+Semantic memory with embeddings
+Add meaning based recall so the system can find days that feel similar even when the numbers differ.
+
+ Generate an embedding for each daily summary through a hosted embedding API.
+ Store the embedding and key metadata in a free tier vector database.
+ Retrieve the closest past days for a question by similarity rather than exact filters.
+ Optionally cluster the embeddings to discover natural day types on their own.
+Predictive and proactive coaching
+Move from describing yesterday to preparing for today.
+
+ Use recent sleep, heart rate variability, and screen trends to estimate the kind of day ahead.
+ Turn the morning notification into a short, forward looking nudge.
+ Detect unusual days automatically and ask what was different so the record stays rich.
+Multimodal capture
+Reduce manual entry by letting the model read images and voice.
+
+ Send a meal photo to a vision model to fill the meal text and estimate macros.
+ Send a screen time screenshot to a vision model to extract per app usage.
+ Use phone dictation to capture the win and blocker by voice.
+Dynamic goals and feedback
+Let the system adapt instead of using fixed rules.
+
+ Store goals and notification thresholds in a CONFIG tab so behavior changes without editing code.
+ Adjust targets gently each week based on recent performance.
+ Let each daily review be rated, and use that rating to tune the tone and focus over time.
+Model routing
+Stay low cost while getting deeper analysis when it matters.
+
+ Use a fast and cheap model for the daily review.
+ Use a stronger model only for weekly and monthly deep analysis.
+ Keep the model choice in config so providers can be swapped without code changes.
+Build Order
+Create the RAW tab and the doPost web app, then confirm one real day flows from phone to sheet.
+Build the iPhone Shortcut to capture the Tier 1 fields and send them each night.
+Add analytics for completion rate, streaks, rolling averages, and the strongest correlation.
+Add the daily job that calls the language model and writes the review into MEMORY.
+Add threshold based phone notifications.
+Add the question branch in doPost so you can ask about your history from the phone.
+Add a hosted vector database later, only if you need meaning based search, keeping the rest of the flow the same.
+Make steps one through three solid before adding any AI, because consistent data is most of the value.
+
+Constraints
+The pipeline runs automatically on a daily schedule and needs no manual step once set up.
+The system uses free tier services so the running cost stays near zero.
+The iPhone is the main capture device.
+An optional analysis notebook can be used now and then for deeper monthly study, separate from the daily flow.
