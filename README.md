@@ -98,6 +98,10 @@ Daily measurements and subjective fields remain one summary record per date. Hab
 
 Same date + same payload is an idempotent no-op. Same date + changed payload updates that date's row. Individual habit events upsert by date + habit ID. The model prevents duplicate daily captures while allowing corrections. It is not an immutable event ledger: edits are allowed and audit events record the operation.
 
+### Retrieve the habit catalogue
+
+POST `{"action":"habit_list"}` to retrieve active habit definitions for a Shortcut selector. Use `{"action":"habit_list","include_archived":true}` only for history or administration.
+
 ### Create or update a habit
 
 POST this action to the web app (include the shared secret when configured):
@@ -117,7 +121,7 @@ POST this action to the web app (include the shared secret when configured):
 }
 ```
 
-The response returns a stable `habit_id`. Retain that ID in the Shortcut. Supported cadence values: `daily`, `weekdays`, `weekends`, `weekly` and `custom`. For weekly/custom schedules, `schedule_days` is a comma-separated list using Sunday=0 through Saturday=6. Archive a habit with `{"action":"habit_archive","habit_id":"..."}`.
+The response returns a stable `habit_id`. Retain that ID in the Shortcut. Partial updates preserve omitted settings. An archived habit is excluded from the active catalogue and cannot receive events after its end date. Supported cadence values: `daily`, `weekdays`, `weekends`, `weekly` and `custom`. For weekly/custom schedules, `schedule_days` is a comma-separated list using Sunday=0 through Saturday=6. Archive a habit with `{"action":"habit_archive","habit_id":"..."}`.
 
 ### Submit per-habit statuses
 
