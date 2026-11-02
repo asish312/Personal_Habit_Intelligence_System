@@ -44,8 +44,8 @@ These are defensive input bounds, not health recommendations.
 - Completion rate = reported \`habits_done / habits_total\`; blank when denominator is absent or zero.
 - Current streak = consecutive available daily records meeting configured completion threshold, evaluated from the latest record backwards. Missing dates/records terminate the run rather than being silently assumed complete.
 - Longest streak = longest run of qualifying records in the data currently stored.
-- Rolling averages = arithmetic mean of available numeric observations in the latest seven recorded rows (not an imputed calendar-day series).
-- Week-over-week change = latest seven-record average minus the preceding seven-record average; blank until both windows contain values.
+- Rolling averages = arithmetic mean of available numeric observations within the latest seven calendar days ending on the requested date. Missing dates and missing metric values are not imputed.
+- Week-over-week change = latest seven-calendar-day average minus the preceding seven-calendar-day average; blank until both windows contain values.
 - Correlation = Pearson r over observations sharing the current record's day type; only shown at or above configured minimum sample size. It is descriptive, not causal.
 
 ## AI interpretation rules
