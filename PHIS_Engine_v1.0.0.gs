@@ -355,20 +355,28 @@ function computeAnalytics(targetDate) {
   const idx = records.map(function(r){return phisNormalizeDate_(r.date);}).lastIndexOf(date);
   if (idx < 0) throw new Error("No RAW record for " + date);
   const current = records[idx];
-  const start = Math.max(0, idx-6);
-  const last7 = records.slice(start, idx+1);
-  const previous7 = records.slice(Math.max(0,idx-13), Math.max(0,idx-6));
+  function dayOrdinal_(value) {
+    const normalized=phisNormalizeDate_(value);
+    const parts=normalized.split("-").map(Number);
+    return Math.floor(Date.UTC(parts[0],parts[1]-1,parts[2])/86400000);
+  }
+  const targetOrdinal=dayOrdinal_(date);
+  const last7Start=targetOrdinal-6;
+  const previous7Start=targetOrdinal-13;
+  const last7 = records.filter(function(r){
+    const ordinal=dayOrdinal_(r.date);
+    return ordinal>=last7Start && ordinal<=targetOrdinal;
+  });
+  const previous7 = records.filter(function(r){
+    const ordinal=dayOrdinal_(r.date);
+    return ordinal>=previous7Start && ordinal<last7Start;
+  });
   const streakThreshold = Number(phisConfig_().COMPLETION_STREAK_THRESHOLD || 0.8);
   function completion(r) {
     const total=phisValidNumber_(r.habits_total), done=phisValidNumber_(r.habits_done);
     return total && done !== null ? done/total : null;
   }
   let streak=0, longest=0, run=0;
-  function dayOrdinal_(value) {
-    const normalized=phisNormalizeDate_(value);
-    const parts=normalized.split("-").map(Number);
-    return Math.floor(Date.UTC(parts[0],parts[1]-1,parts[2])/86400000);
-  }
   // Historical queries are evaluated only through their requested date.
   for (let i=idx;i>=0;i--) {
     if (i < idx && dayOrdinal_(records[i+1].date)-dayOrdinal_(records[i].date)!==1) break;
