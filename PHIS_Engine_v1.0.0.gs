@@ -14,7 +14,11 @@ const PHIS = Object.freeze({
     ANALYTICS: "ANALYTICS",
     MEMORY: "MEMORY",
     CONFIG: "CONFIG",
-    AUDIT: "AUDIT_LOG"
+    AUDIT: "AUDIT_LOG",
+    HABITS: "HABIT_MASTER",
+    HABIT_LOG: "HABIT_LOG",
+    HABIT_ANALYTICS: "HABIT_ANALYTICS",
+    DASHBOARD: "DASHBOARD"
   }),
   HEADERS: Object.freeze({
     RAW: [
@@ -38,7 +42,10 @@ const PHIS = Object.freeze({
       "protein_signal", "tags", "provider", "model", "created_at", "status"
     ],
     CONFIG: ["key", "value", "description"],
-    AUDIT: ["timestamp", "event", "date", "status", "details"]
+    AUDIT: ["timestamp", "event", "date", "status", "details"],
+    HABITS: ["habit_id", "habit_name", "category", "cadence", "schedule_days", "active", "target_value", "unit", "preferred_time", "start_date", "end_date", "created_at", "notes"],
+    HABIT_LOG: ["date", "habit_id", "habit_name", "status", "value", "target_value", "duration_min", "notes", "source", "updated_at", "payload_hash"],
+    HABIT_ANALYTICS: ["as_of_date", "habit_id", "habit_name", "category", "scheduled_days", "done_days", "partial_days", "skipped_days", "missed_days", "not_reported_days", "adherence_rate", "current_streak", "longest_streak", "last_done_date"]
   }),
   OPTIONAL_FIELDS: Object.freeze([
     "sleep_hours", "bedtime", "wake_time", "resting_hr", "hrv", "steps",
@@ -83,6 +90,12 @@ function doPost(e) {
     const secret = PropertiesService.getScriptProperties().getProperty("WEB_APP_SECRET");
     if (secret && String(payload.secret || "") !== secret) {
       return phisJson_({ok: false, error: "Unauthorized"});
+    }
+    if (payload.action === "habit_upsert") {
+      return phisJson_({ok: true, result: upsertHabitDefinition(payload.habit || {})});
+    }
+    if (payload.action === "habit_archive") {
+      return phisJson_({ok: true, result: archiveHabit(String(payload.habit_id || ""))});
     }
     if (payload.question) {
       const answer = answerQuestion(String(payload.question));
@@ -130,6 +143,8 @@ function setupPHISWorkbook() {
       }
     }
   });
+  let dashboard = ss.getSheetByName(PHIS.SHEETS.DASHBOARD);
+  if (!dashboard) dashboard = ss.insertSheet(PHIS.SHEETS.DASHBOARD);
   phisSeedConfig_();
   phisAudit_("WORKBOOK_SETUP", "", "SUCCESS", "Workbook schemas verified");
   return {ok: true, sheets: Object.keys(PHIS.SHEETS).map(function(k){return PHIS.SHEETS[k];})};
@@ -190,6 +205,26 @@ function phisValidatePayload_(payload) {
       Number(payload.habits_done) > Number(payload.habits_total)) {
     throw new Error("habits_done cannot exceed habits_total");
   }
+  if (payload.habits !== undefined) {
+    if (!Array.isArray(payload.habits)) throw new Error("habits must be an array");
+    const ids = {};
+    const known = phisGetHabitMap_();
+    payload.habits.forEach(function(event) {
+      if (!event || typeof event !== "object" || Array.isArray(event)) throw new Error("Each habit entry must be an object");
+      const id = String(event.habit_id || "").trim();
+      if (!id || !known[id]) throw new Error("Unknown habit_id: " + id);
+      if (ids[id]) throw new Error("Duplicate habit_id in payload: " + id);
+      ids[id] = true;
+      if (["done","partial","skipped","missed","not_reported"].indexOf(String(event.status || "")) < 0) {
+        throw new Error("Invalid status for habit " + id);
+      }
+      ["value","target_value","duration_min"].forEach(function(key) {
+        if (event[key] === undefined || event[key] === null || event[key] === "") return;
+        const n = Number(event[key]);
+        if (!isFinite(n) || n < 0 || n > 1000000) throw new Error("Invalid " + key + " for habit " + id);
+      });
+    });
+  }
   return date;
 }
 
@@ -199,6 +234,7 @@ function phisPayloadHash_(payload) {
     if (payload[k] !== undefined) clean[k] = payload[k];
   });
   clean.date = phisNormalizeDate_(payload.date);
+  if (Array.isArray(payload.habits)) clean.habits = payload.habits;
   return Utilities.computeDigest(
     Utilities.DigestAlgorithm.SHA_256,
     JSON.stringify(clean),
@@ -232,19 +268,25 @@ function ingestDailyRecord(payload) {
         if (String(dates[i][0]) === date) { rowIndex = i+2; break; }
       }
     }
+    let dailyStatus, dailyRow;
     if (rowIndex) {
       const oldHash = String(sheet.getRange(rowIndex, headers.indexOf("payload_hash")+1).getValue() || "");
       if (oldHash === hash) {
-        phisAudit_("INGEST_REPLAY", date, "NOOP", "Identical daily payload ignored");
-        return {status:"unchanged", date:date, row:rowIndex};
+        dailyStatus = "unchanged"; dailyRow = rowIndex;
+      } else {
+        sheet.getRange(rowIndex, 1, 1, values.length).setValues([values]);
+        dailyStatus = "updated"; dailyRow = rowIndex;
       }
-      sheet.getRange(rowIndex, 1, 1, values.length).setValues([values]);
-      phisAudit_("INGEST_UPDATE", date, "SUCCESS", "Existing daily record updated");
-      return {status:"updated", date:date, row:rowIndex};
+    } else {
+      sheet.appendRow(values);
+      dailyStatus = "created"; dailyRow = sheet.getLastRow();
     }
-    sheet.appendRow(values);
-    phisAudit_("INGEST_CREATE", date, "SUCCESS", "Daily record appended");
-    return {status:"created", date:date, row:sheet.getLastRow()};
+    if (Array.isArray(payload.habits) && payload.habits.length) {
+      phisIngestHabitLogs_(date, payload.habits, payload.source || "shortcut");
+    }
+    phisAudit_("INGEST_" + dailyStatus.toUpperCase(), date, "SUCCESS",
+      "Daily record " + dailyStatus + (payload.habits && payload.habits.length ? "; habit events upserted: " + payload.habits.length : ""));
+    return {status:dailyStatus, date:date, row:dailyRow};
   } finally {
     lock.releaseLock();
   }
@@ -412,6 +454,8 @@ function runDailyJob() {
   if (!raw.length) return {ok:false, error:"No daily data"};
   const date=phisNormalizeDate_(raw[raw.length-1].date);
   const stats=computeAnalytics(date);
+  const habitStats=computeHabitAnalytics(date);
+  refreshPHISDashboard(date,stats,habitStats);
   let review={status:"disabled"};
   if (String(phisConfig_().DAILY_REVIEW_ENABLED).toLowerCase()==="true") {
     review=generateDailyReview(date,stats);
@@ -522,7 +566,10 @@ function answerQuestion(question) {
   const context={
     recent_days:raw.slice(-45),
     analytics:analytics.slice(-30),
-    reviews:memory.slice(-30)
+    reviews:memory.slice(-30),
+    habits:phisReadObjects_(PHIS.SHEETS.HABITS),
+    habit_analytics:phisReadObjects_(PHIS.SHEETS.HABIT_ANALYTICS).slice(-100),
+    recent_habit_events:phisReadObjects_(PHIS.SHEETS.HABIT_LOG).slice(-120)
   };
   const props=PropertiesService.getScriptProperties();
   const config=phisConfig_();
@@ -589,7 +636,7 @@ function phisAudit_(event,date,status,details) {
 
 function phisValidateWorkbook() {
   const ss=phisSpreadsheet_(), errors=[];
-  Object.keys(PHIS.SHEETS).forEach(function(key){
+  Object.keys(PHIS.HEADERS).forEach(function(key){
     const sheet=ss.getSheetByName(PHIS.SHEETS[key]);
     if (!sheet) errors.push("Missing sheet: "+PHIS.SHEETS[key]);
     else {
@@ -597,5 +644,277 @@ function phisValidateWorkbook() {
       if (header.join("|")!==PHIS.HEADERS[key].join("|")) errors.push("Header mismatch: "+PHIS.SHEETS[key]);
     }
   });
+  if (!ss.getSheetByName(PHIS.SHEETS.DASHBOARD)) errors.push("Missing sheet: "+PHIS.SHEETS.DASHBOARD);
   return {ok:errors.length===0,errors:errors,version:PHIS.VERSION};
+}
+
+
+/* ------------------------- Habit-level intelligence ---------------------- */
+
+function upsertHabitDefinition(definition) {
+  const name=String(definition.habit_name || "").trim();
+  if (!name) throw new Error("habit_name is required");
+  const cadence=String(definition.cadence || "daily").toLowerCase();
+  if (["daily","weekdays","weekends","weekly","custom"].indexOf(cadence)<0) {
+    throw new Error("cadence must be daily, weekdays, weekends, weekly or custom");
+  }
+  const scheduleDays=String(definition.schedule_days || (cadence==="weekly" ? "1" : ""));
+  if (cadence==="custom" && !scheduleDays) throw new Error("custom cadence requires schedule_days (0=Sunday ... 6=Saturday)");
+  if (scheduleDays && scheduleDays.split(",").some(function(v){
+    return !/^[0-6]$/.test(v.trim());
+  })) throw new Error("schedule_days must be comma-separated weekdays 0 through 6");
+  const lock=LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const sheet=phisSpreadsheet_().getSheetByName(PHIS.SHEETS.HABITS);
+    const id=String(definition.habit_id || Utilities.getUuid());
+    const rows=phisReadObjects_(PHIS.SHEETS.HABITS);
+    const existing=rows.filter(function(r){return String(r.habit_id)===id;})[0];
+    const tz=String(phisConfig_().TIMEZONE || "Asia/Kolkata");
+    const today=Utilities.formatDate(new Date(),tz,"yyyy-MM-dd");
+    const active=definition.active===undefined ? true : definition.active===true || String(definition.active).toLowerCase()==="true";
+    const row=[
+      id,name,String(definition.category || "General"),cadence,scheduleDays,active,
+      definition.target_value===undefined ? "" : Number(definition.target_value),
+      String(definition.unit || ""),String(definition.preferred_time || ""),
+      definition.start_date ? phisNormalizeDate_(definition.start_date) : (existing ? existing.start_date : today),
+      definition.end_date ? phisNormalizeDate_(definition.end_date) : (existing ? existing.end_date : ""),
+      existing ? existing.created_at : new Date(),String(definition.notes || "")
+    ];
+    if (row[6]!=="" && (!isFinite(row[6]) || row[6]<0)) throw new Error("target_value must be a non-negative number");
+    if (existing) {
+      const index=rows.findIndex(function(r){return String(r.habit_id)===id;})+2;
+      sheet.getRange(index,1,1,row.length).setValues([row]);
+    } else {
+      sheet.appendRow(row);
+    }
+    phisAudit_("HABIT_" + (existing ? "UPDATE":"CREATE"),"", "SUCCESS",id+" — "+name);
+    return {habit_id:id,habit_name:name,status:existing?"updated":"created"};
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function archiveHabit(habitId) {
+  if (!habitId) throw new Error("habit_id is required");
+  const sheet=phisSpreadsheet_().getSheetByName(PHIS.SHEETS.HABITS);
+  const rows=phisReadObjects_(PHIS.SHEETS.HABITS);
+  const index=rows.findIndex(function(r){return String(r.habit_id)===habitId;});
+  if (index<0) throw new Error("Habit not found: "+habitId);
+  sheet.getRange(index+2,6).setValue(false);
+  sheet.getRange(index+2,11).setValue(Utilities.formatDate(new Date(),String(phisConfig_().TIMEZONE || "Asia/Kolkata"),"yyyy-MM-dd"));
+  phisAudit_("HABIT_ARCHIVE","", "SUCCESS",habitId);
+  return {habit_id:habitId,status:"archived"};
+}
+
+function phisGetHabitMap_() {
+  const out={};
+  phisReadObjects_(PHIS.SHEETS.HABITS).forEach(function(h){out[String(h.habit_id)]=h;});
+  return out;
+}
+
+function phisHabitEventHash_(date,event) {
+  const normalized={
+    date:date,habit_id:String(event.habit_id),status:String(event.status),
+    value:event.value===undefined?"":event.value,
+    target_value:event.target_value===undefined?"":event.target_value,
+    duration_min:event.duration_min===undefined?"":event.duration_min,
+    notes:event.notes||""
+  };
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,JSON.stringify(normalized),Utilities.Charset.UTF_8)
+    .map(function(b){return ("0"+((b+256)%256).toString(16)).slice(-2);}).join("");
+}
+
+function phisIngestHabitLogs_(date,events,source) {
+  if (!events.length) return [];
+  const sheet=phisSpreadsheet_().getSheetByName(PHIS.SHEETS.HABIT_LOG);
+  const headers=PHIS.HEADERS.HABIT_LOG;
+  const existing=phisReadObjects_(PHIS.SHEETS.HABIT_LOG);
+  const results=[];
+  events.forEach(function(event){
+    const habit=phisGetHabitMap_()[String(event.habit_id)];
+    const hash=phisHabitEventHash_(date,event);
+    const row=[
+      date,String(event.habit_id),habit.habit_name,String(event.status),
+      event.value===undefined?"":Number(event.value),
+      event.target_value===undefined?(habit.target_value || ""):Number(event.target_value),
+      event.duration_min===undefined?"":Number(event.duration_min),
+      String(event.notes || ""),String(source || "shortcut"),new Date(),hash
+    ];
+    const index=existing.findIndex(function(r){
+      return String(r.date)===date && String(r.habit_id)===String(event.habit_id);
+    });
+    if (index>=0) {
+      const rowNumber=index+2;
+      const oldHash=String(sheet.getRange(rowNumber,headers.indexOf("payload_hash")+1).getValue() || "");
+      if (oldHash===hash) {results.push({habit_id:event.habit_id,status:"unchanged"});return;}
+      sheet.getRange(rowNumber,1,1,row.length).setValues([row]);
+      results.push({habit_id:event.habit_id,status:"updated"});
+    } else {
+      sheet.appendRow(row);
+      results.push({habit_id:event.habit_id,status:"created"});
+    }
+  });
+  return results;
+}
+
+function phisIsHabitScheduled_(habit,dateText) {
+  const day=new Date(dateText+"T12:00:00Z").getUTCDay();
+  const cadence=String(habit.cadence || "daily");
+  const days=String(habit.schedule_days || "").split(",").map(function(v){return Number(v.trim());});
+  if (cadence==="daily") return true;
+  if (cadence==="weekdays") return day>=1 && day<=5;
+  if (cadence==="weekends") return day===0 || day===6;
+  if (cadence==="weekly" || cadence==="custom") return days.indexOf(day)>=0;
+  return false;
+}
+
+function phisAddDays_(dateText,delta) {
+  const parts=dateText.split("-").map(Number);
+  const d=new Date(Date.UTC(parts[0],parts[1]-1,parts[2]+delta,12));
+  return d.toISOString().slice(0,10);
+}
+
+function computeHabitAnalytics(asOfDate) {
+  const raw=phisReadObjects_(PHIS.SHEETS.RAW).sort(function(a,b){
+    return phisNormalizeDate_(a.date).localeCompare(phisNormalizeDate_(b.date));
+  });
+  const date=asOfDate ? phisNormalizeDate_(asOfDate) : (raw.length ? phisNormalizeDate_(raw[raw.length-1].date) : "");
+  if (!date) return {date:"",habits:[]};
+  const definitions=phisReadObjects_(PHIS.SHEETS.HABITS);
+  const logs=phisReadObjects_(PHIS.SHEETS.HABIT_LOG);
+  const logMap={};
+  logs.forEach(function(row){
+    const logDate=phisNormalizeDate_(row.date);
+    if (logDate<=date) logMap[logDate+"|"+String(row.habit_id)]=row;
+  });
+  const earliestRaw=raw.length ? phisNormalizeDate_(raw[0].date) : date;
+  const output=[];
+  definitions.forEach(function(habit){
+    const start=habit.start_date ? phisNormalizeDate_(habit.start_date) : earliestRaw;
+    const end=habit.end_date ? (phisNormalizeDate_(habit.end_date)<date ? phisNormalizeDate_(habit.end_date) : date) : date;
+    if (start>end) return;
+    let scheduled=0,done=0,partial=0,skipped=0,missed=0,notReported=0;
+    let current=0,longest=0,run=0,lastDone="";
+    const expected=[];
+    for (let day=start;day<=end;day=phisAddDays_(day,1)) {
+      if (!phisIsHabitScheduled_(habit,day)) continue;
+      scheduled++;
+      const event=logMap[day+"|"+String(habit.habit_id)];
+      const status=event ? String(event.status) : "not_reported";
+      expected.push({date:day,status:status});
+      if (status==="done") {done++;lastDone=day;run++;longest=Math.max(longest,run);}
+      else {
+        if (status==="partial") partial++;
+        else if (status==="skipped") skipped++;
+        else if (status==="missed") missed++;
+        else notReported++;
+        run=0;
+      }
+    }
+    for (let i=expected.length-1;i>=0;i--) {
+      if (expected[i].status!=="done") break;
+      current++;
+    }
+    const rate=scheduled ? (done + 0.5*partial)/scheduled : "";
+    const row=[
+      date,String(habit.habit_id),String(habit.habit_name),String(habit.category),
+      scheduled,done,partial,skipped,missed,notReported,rate,current,longest,lastDone
+    ];
+    phisUpsertByDate_(PHIS.SHEETS.HABIT_ANALYTICS,date+"|"+String(habit.habit_id),row);
+    output.push({
+      habit_id:String(habit.habit_id),habit_name:String(habit.habit_name),
+      scheduled_days:scheduled,done_days:done,partial_days:partial,
+      skipped_days:skipped,missed_days:missed,not_reported_days:notReported,
+      adherence_rate:rate,current_streak:current,longest_streak:longest,last_done_date:lastDone
+    });
+  });
+  return {date:date,habits:output};
+}
+
+function refreshPHISDashboard(asOfDate,stats,habitStats) {
+  const ss=phisSpreadsheet_();
+  const dash=ss.getSheetByName(PHIS.SHEETS.DASHBOARD) || ss.insertSheet(PHIS.SHEETS.DASHBOARD);
+  dash.getCharts().forEach(function(chart){dash.removeChart(chart);});
+  dash.clear();
+  const raw=phisReadObjects_(PHIS.SHEETS.RAW).sort(function(a,b){
+    return phisNormalizeDate_(a.date).localeCompare(phisNormalizeDate_(b.date));
+  });
+  if (!raw.length) {
+    dash.getRange("A1").setValue("Personal Habit Intelligence System");
+    dash.getRange("A2").setValue("No daily data yet. Submit a capture to begin.");
+    return {ok:true,empty:true};
+  }
+  const latest=phisNormalizeDate_(asOfDate || raw[raw.length-1].date);
+  const analytics=stats || computeAnalytics(latest);
+  const habitData=habitStats || computeHabitAnalytics(latest);
+  dash.setHiddenGridlines(true);
+  dash.getRange("A1:H1").merge().setValue("PERSONAL HABIT INTELLIGENCE SYSTEM");
+  dash.getRange("A2:H2").merge().setValue("Behaviour, consistency and recovery — as of "+latest);
+  dash.getRange("A1:H1").setBackground("#14213D").setFontColor("#FFFFFF").setFontSize(16).setFontWeight("bold");
+  dash.getRange("A2:H2").setBackground("#EAF0F8").setFontColor("#334155").setFontSize(10);
+  const labels=["Daily completion","Current streak","7-record avg sleep","7-record avg steps"];
+  const values=[
+    analytics.completion_rate==="" ? "—" : analytics.completion_rate,
+    analytics.current_streak,
+    analytics.rolling_averages.sleep_hours==="" ? "—" : analytics.rolling_averages.sleep_hours,
+    analytics.rolling_averages.steps==="" ? "—" : analytics.rolling_averages.steps
+  ];
+  const ranges=[["A4:B4","A5:B6"],["C4:D4","C5:D6"],["E4:F4","E5:F6"],["G4:H4","G5:H6"]];
+  ranges.forEach(function(r,i){
+    dash.getRange(r[0]).merge().setValue(labels[i]).setBackground("#E9EFF7").setFontColor("#475569").setFontWeight("bold");
+    dash.getRange(r[1]).merge().setValue(values[i]).setBackground("#F8FAFC").setFontColor("#0F172A").setFontSize(18).setFontWeight("bold");
+  });
+  dash.getRange("A8:H8").merge().setValue("PER-HABIT ADHERENCE");
+  dash.getRange("A8:H8").setBackground("#14213D").setFontColor("#FFFFFF").setFontWeight("bold");
+  if (habitData.habits.length) {
+    const top=habitData.habits.slice().sort(function(a,b){
+      return (b.adherence_rate||0)-(a.adherence_rate||0);
+    }).slice(0,8);
+    dash.getRange(9,1,1,4).setValues([["Habit","Adherence","Current streak","Missed / not reported"]]);
+    dash.getRange(10,1,top.length,4).setValues(top.map(function(h){
+      return [h.habit_name,h.adherence_rate,h.current_streak,h.missed_days+" / "+h.not_reported_days];
+    }));
+    dash.getRange(9,1,1,4).setFontWeight("bold").setBackground("#E9EFF7");
+    dash.getRange(10,2,top.length,1).setNumberFormat("0.0%");
+  } else {
+    dash.getRange("A9").setValue("Add habits to HABIT_MASTER and send per-habit status events to activate this view.");
+  }
+  const analyticsSheet=ss.getSheetByName(PHIS.SHEETS.ANALYTICS);
+  const lastA=analyticsSheet.getLastRow();
+  if (lastA>=2) {
+    const completionChart=dash.newChart().asLineChart()
+      .addRange(analyticsSheet.getRange(1,1,lastA,1))
+      .addRange(analyticsSheet.getRange(1,2,lastA,1))
+      .setNumHeaders(1).setPosition(20,1,0,0)
+      .setOption("title","Daily habit completion rate")
+      .setOption("vAxis",{viewWindow:{min:0,max:1},format:"0%"})
+      .setOption("legend",{position:"none"})
+      .build();
+    dash.insertChart(completionChart);
+    const sleepChart=dash.newChart().asLineChart()
+      .addRange(analyticsSheet.getRange(1,1,lastA,1))
+      .addRange(analyticsSheet.getRange(1,5,lastA,1))
+      .setNumHeaders(1).setPosition(20,9,0,0)
+      .setOption("title","7-record average sleep (hours)")
+      .setOption("legend",{position:"none"})
+      .build();
+    dash.insertChart(sleepChart);
+  }
+  const habitSheet=ss.getSheetByName(PHIS.SHEETS.HABIT_ANALYTICS);
+  const habitLast=habitSheet.getLastRow();
+  if (habitLast>=2) {
+    const habitChart=dash.newChart().asColumnChart()
+      .addRange(habitSheet.getRange(1,3,habitLast,1))
+      .addRange(habitSheet.getRange(1,11,habitLast,1))
+      .setNumHeaders(1).setPosition(38,1,0,0)
+      .setOption("title","Per-habit adherence")
+      .setOption("vAxis",{viewWindow:{min:0,max:1},format:"0%"})
+      .setOption("legend",{position:"none"})
+      .build();
+    dash.insertChart(habitChart);
+  }
+  dash.setColumnWidths(1,8,125);
+  dash.setFrozenRows(2);
+  return {ok:true,date:latest,habit_count:habitData.habits.length,charts:dash.getCharts().length};
 }
