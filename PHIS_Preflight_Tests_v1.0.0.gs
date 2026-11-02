@@ -42,6 +42,14 @@ function PHIS_RUN_ALL_PREFLIGHT_TESTS() {
       if (a.date!=="2026-01-02" || a.completion_rate!==0.8) throw new Error(JSON.stringify(a));
       if (phisReadObjects_(PHIS.SHEETS.ANALYTICS).length!==1) throw new Error("Analytics row missing");
     }));
+    results.push(phisTest_("Streaks respect calendar gaps and historical cutoffs",function(){
+      const later=phisTestPayload_("2026-01-04"); ingestDailyRecord(later);
+      const latest=computeAnalytics("2026-01-04");
+      if (latest.current_streak!==1) throw new Error("Expected gap to reset streak; got "+latest.current_streak);
+      if (latest.longest_streak!==2) throw new Error("Expected longest streak of 2; got "+latest.longest_streak);
+      const historical=computeAnalytics("2026-01-02");
+      if (historical.current_streak!==2) throw new Error("Historical streak used future rows or lost prior days");
+    }));
   } finally {
     if (original) PropertiesService.getScriptProperties().setProperty("SPREADSHEET_ID",original);
     else PropertiesService.getScriptProperties().deleteProperty("SPREADSHEET_ID");
