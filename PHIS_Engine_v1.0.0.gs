@@ -88,7 +88,10 @@ function doPost(e) {
       return phisJson_({ok: true, app: "PHIS", version: PHIS.VERSION});
     }
     const secret = PropertiesService.getScriptProperties().getProperty("WEB_APP_SECRET");
-    if (secret && String(payload.secret || "") !== secret) {
+    if (!secret) {
+      return phisJson_({ok: false, error: "Endpoint disabled: configure WEB_APP_SECRET in Script Properties"});
+    }
+    if (String(payload.secret || "") !== secret) {
       return phisJson_({ok: false, error: "Unauthorized"});
     }
     if (payload.action === "habit_list") {
