@@ -173,15 +173,17 @@ function phisConfig_() {
 var PHIS_TIMEZONE_CACHE = null;
 function phisNormalizeDate_(value) {
   const tz = PHIS_TIMEZONE_CACHE || (PHIS_TIMEZONE_CACHE = String(phisConfig_().TIMEZONE || "Asia/Kolkata"));
-  let date;
-  if (value instanceof Date) date = value;
-  else if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    date = new Date(value + "T12:00:00");
-  } else {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const parts=value.split("-").map(Number);
+    const candidate=new Date(Date.UTC(parts[0],parts[1]-1,parts[2]));
+    if (candidate.getUTCFullYear()!==parts[0] || candidate.getUTCMonth()!==parts[1]-1 ||
+        candidate.getUTCDate()!==parts[2]) throw new Error("Invalid calendar date: "+value);
+    return value;
+  }
+  if (!(value instanceof Date) || isNaN(value.getTime())) {
     throw new Error("date must be YYYY-MM-DD");
   }
-  if (isNaN(date.getTime())) throw new Error("Invalid date");
-  return Utilities.formatDate(date, tz, "yyyy-MM-dd");
+  return Utilities.formatDate(value, tz, "yyyy-MM-dd");
 }
 
 function phisValidatePayload_(payload) {
