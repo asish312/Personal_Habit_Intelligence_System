@@ -37,7 +37,7 @@ Only include values actually read or explicitly entered. Do not fill unavailable
 5. Ask for discipline rating only if this is a meaningful self-report; do not infer it from Health measurements.
 6. Add a `habits` array with each stable `habit_id` and status. Include optional `value`, `duration_min` and `notes` when relevant.
 7. Build a Dictionary with the JSON fields. Format the date as \`yyyy-MM-dd\` in the user's configured timezone.
-8. Use **Get Contents of URL** → POST → Request Body JSON. Add \`WEB_APP_SECRET\` in the JSON dictionary when configured.
+8. Use **Get Contents of URL** → POST → Request Body JSON. Always add \`WEB_APP_SECRET\` in the JSON dictionary. POST requests are rejected until the secret is configured in Script Properties.
 9. Read the JSON response. Show a success message only when \`ok=true\`; otherwise show the returned error and allow a retry.
 10. Enable an automation to run near the desired capture time. Keep a manual run path for corrections or missed automations.
 
