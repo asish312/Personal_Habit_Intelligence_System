@@ -264,9 +264,9 @@ function ingestDailyRecord(payload) {
     const last = sheet.getLastRow();
     let rowIndex = 0;
     if (last >= 2) {
-      const dates = sheet.getRange(2, dateCol, last-1, 1).getDisplayValues();
+      const dates = sheet.getRange(2, dateCol, last-1, 1).getValues();
       for (let i = dates.length-1; i >= 0; i--) {
-        if (String(dates[i][0]) === date) { rowIndex = i+2; break; }
+        try { if (phisNormalizeDate_(dates[i][0]) === date) { rowIndex = i+2; break; } } catch (ignored) {}
       }
     }
     let dailyStatus, dailyRow;
@@ -303,8 +303,8 @@ function ingestDailyRecord(payload) {
 }
 
 function phisDayType_(dateText) {
-  const date = new Date(dateText + "T12:00:00");
-  const day = date.getDay();
+  const date = new Date(dateText + "T12:00:00Z");
+  const day = date.getUTCDay();
   return (day === 0 || day === 6) ? "weekend" : "weekday";
 }
 
@@ -348,7 +348,7 @@ function phisCorrelation_(pairs) {
 
 function computeAnalytics(targetDate) {
   const records = phisReadObjects_(PHIS.SHEETS.RAW).sort(function(a,b){
-    return String(a.date).localeCompare(String(b.date));
+    return phisNormalizeDate_(a.date).localeCompare(phisNormalizeDate_(b.date));
   });
   if (!records.length) return {ok:false, error:"No daily records"};
   const date = targetDate ? phisNormalizeDate_(targetDate) : phisNormalizeDate_(records[records.length-1].date);
@@ -447,9 +447,11 @@ function phisUpsertByDate_(sheetName, date, row) {
   const sheet=phisSpreadsheet_().getSheetByName(sheetName);
   const last=sheet.getLastRow();
   if (last>=2) {
-    const dates=sheet.getRange(2,1,last-1,1).getDisplayValues();
+    const dates=sheet.getRange(2,1,last-1,1).getValues();
     for (let i=dates.length-1;i>=0;i--) {
-      if (String(dates[i][0])===date) {
+      let rowDate="";
+      try { rowDate=phisNormalizeDate_(dates[i][0]); } catch (ignored) {}
+      if (rowDate===date) {
         sheet.getRange(i+2,1,1,row.length).setValues([row]);
         sheet.getRange(2,1,sheet.getLastRow()-1,sheet.getLastColumn()).sort({column:1,ascending:true});
         return i+2;
@@ -693,13 +695,16 @@ function upsertHabitDefinition(definition) {
     const tz=String(phisConfig_().TIMEZONE || "Asia/Kolkata");
     const today=Utilities.formatDate(new Date(),tz,"yyyy-MM-dd");
     const active=definition.active===undefined ? true : definition.active===true || String(definition.active).toLowerCase()==="true";
+    const wasActive=existing ? String(existing.active).toLowerCase()==="true" : false;
+    const endDate=definition.end_date ? phisNormalizeDate_(definition.end_date) :
+      (!active ? today : (existing && !wasActive ? "" : (existing ? existing.end_date : "")));
     const row=[
       id,name,String(definition.category || "General"),cadence,scheduleDays,active,
-      definition.target_value===undefined ? "" : Number(definition.target_value),
-      String(definition.unit || ""),String(definition.preferred_time || ""),
+      definition.target_value===undefined ? (existing ? existing.target_value : "") : Number(definition.target_value),
+      String(definition.unit || (existing ? existing.unit : "")),String(definition.preferred_time || (existing ? existing.preferred_time : "")),
       definition.start_date ? phisNormalizeDate_(definition.start_date) : (existing ? existing.start_date : today),
-      definition.end_date ? phisNormalizeDate_(definition.end_date) : (existing ? existing.end_date : ""),
-      existing ? existing.created_at : new Date(),String(definition.notes || "")
+      endDate,
+      existing ? existing.created_at : new Date(),String(definition.notes || (existing ? existing.notes : ""))
     ];
     if (row[6]!=="" && (!isFinite(row[6]) || row[6]<0)) throw new Error("target_value must be a non-negative number");
     if (existing) {
@@ -762,7 +767,7 @@ function phisIngestHabitLogs_(date,events,source) {
       String(event.notes || ""),String(source || "shortcut"),new Date(),hash
     ];
     const index=existing.findIndex(function(r){
-      return String(r.date)===date && String(r.habit_id)===String(event.habit_id);
+      return phisNormalizeDate_(r.date)===date && String(r.habit_id)===String(event.habit_id);
     });
     if (index>=0) {
       const rowNumber=index+2;
@@ -811,6 +816,7 @@ function computeHabitAnalytics(asOfDate) {
   const earliestRaw=raw.length ? phisNormalizeDate_(raw[0].date) : date;
   const output=[];
   definitions.forEach(function(habit){
+    if (String(habit.active).toLowerCase()==="false" && !habit.end_date) return;
     const start=habit.start_date ? phisNormalizeDate_(habit.start_date) : earliestRaw;
     const end=habit.end_date ? (phisNormalizeDate_(habit.end_date)<date ? phisNormalizeDate_(habit.end_date) : date) : date;
     if (start>end) return;
@@ -856,9 +862,11 @@ function phisUpsertHabitAnalytics_(date,habitId,row) {
   const sheet=phisSpreadsheet_().getSheetByName(PHIS.SHEETS.HABIT_ANALYTICS);
   const last=sheet.getLastRow();
   if (last>=2) {
-    const keys=sheet.getRange(2,1,last-1,2).getDisplayValues();
+    const keys=sheet.getRange(2,1,last-1,2).getValues();
     for (let i=keys.length-1;i>=0;i--) {
-      if (String(keys[i][0])===date && String(keys[i][1])===habitId) {
+      let rowDate="";
+      try { rowDate=phisNormalizeDate_(keys[i][0]); } catch (ignored) {}
+      if (rowDate===date && String(keys[i][1])===habitId) {
         sheet.getRange(i+2,1,1,row.length).setValues([row]);
         return i+2;
       }
@@ -875,6 +883,7 @@ function refreshPHISDashboard(asOfDate,stats,habitStats) {
   const ss=phisSpreadsheet_();
   const dash=ss.getSheetByName(PHIS.SHEETS.DASHBOARD) || ss.insertSheet(PHIS.SHEETS.DASHBOARD);
   dash.getCharts().forEach(function(chart){dash.removeChart(chart);});
+  dash.getRange(1,1,dash.getMaxRows(),dash.getMaxColumns()).breakApart();
   dash.clear();
   const raw=phisReadObjects_(PHIS.SHEETS.RAW).sort(function(a,b){
     return phisNormalizeDate_(a.date).localeCompare(phisNormalizeDate_(b.date));
