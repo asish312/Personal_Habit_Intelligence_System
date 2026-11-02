@@ -36,6 +36,11 @@ function PHIS_RUN_ALL_PREFLIGHT_TESTS() {
       let threw=false; try { ingestDailyRecord(p); } catch(e) { threw=true; }
       if (!threw) throw new Error("Invalid completion accepted");
     }));
+    results.push(phisTest_("Validation rejects impossible calendar dates",function(){
+      const p=phisTestPayload_("2026-02-31");
+      let threw=false; try { ingestDailyRecord(p); } catch(e) { threw=true; }
+      if (!threw) throw new Error("Invalid calendar date accepted");
+    }));
     results.push(phisTest_("Analytics computes and persists",function(){
       const p=phisTestPayload_("2026-01-02"); ingestDailyRecord(p);
       const a=computeAnalytics("2026-01-02");
