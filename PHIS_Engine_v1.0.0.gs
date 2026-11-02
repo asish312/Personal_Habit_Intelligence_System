@@ -170,8 +170,9 @@ function phisConfig_() {
   }, {});
 }
 
+var PHIS_TIMEZONE_CACHE = null;
 function phisNormalizeDate_(value) {
-  const tz = String(phisConfig_().TIMEZONE || "Asia/Kolkata");
+  const tz = PHIS_TIMEZONE_CACHE || (PHIS_TIMEZONE_CACHE = String(phisConfig_().TIMEZONE || "Asia/Kolkata"));
   let date;
   if (value instanceof Date) date = value;
   else if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -286,7 +287,13 @@ function ingestDailyRecord(payload) {
     }
     const analyticsStats=computeAnalytics(date);
     const habitStats=computeHabitAnalytics(date);
-    refreshPHISDashboard(date,analyticsStats,habitStats);
+    const allRaw=phisReadObjects_(PHIS.SHEETS.RAW).sort(function(a,b){
+      return phisNormalizeDate_(a.date).localeCompare(phisNormalizeDate_(b.date));
+    });
+    const latestDate=phisNormalizeDate_(allRaw[allRaw.length-1].date);
+    const latestAnalytics=latestDate===date ? analyticsStats : computeAnalytics(latestDate);
+    const latestHabitStats=latestDate===date ? habitStats : computeHabitAnalytics(latestDate);
+    refreshPHISDashboard(latestDate,latestAnalytics,latestHabitStats);
     phisAudit_("INGEST_" + dailyStatus.toUpperCase(), date, "SUCCESS",
       "Daily record " + dailyStatus + (payload.habits && payload.habits.length ? "; habit events upserted: " + payload.habits.length : ""));
     return {status:dailyStatus, date:date, row:dailyRow};
@@ -443,11 +450,15 @@ function phisUpsertByDate_(sheetName, date, row) {
     const dates=sheet.getRange(2,1,last-1,1).getDisplayValues();
     for (let i=dates.length-1;i>=0;i--) {
       if (String(dates[i][0])===date) {
-        sheet.getRange(i+2,1,1,row.length).setValues([row]); return i+2;
+        sheet.getRange(i+2,1,1,row.length).setValues([row]);
+        sheet.getRange(2,1,sheet.getLastRow()-1,sheet.getLastColumn()).sort({column:1,ascending:true});
+        return i+2;
       }
     }
   }
-  sheet.appendRow(row); return sheet.getLastRow();
+  sheet.appendRow(row);
+  if (sheet.getLastRow()>2) sheet.getRange(2,1,sheet.getLastRow()-1,sheet.getLastColumn()).sort({column:1,ascending:true});
+  return sheet.getLastRow();
 }
 
 function runDailyJob() {
@@ -562,10 +573,16 @@ function maybeNotify(date,stats,review) {
 function answerQuestion(question) {
   const q=String(question||"").trim();
   if (!q) throw new Error("Question cannot be empty");
-  const raw=phisReadObjects_(PHIS.SHEETS.RAW);
+  const raw=phisReadObjects_(PHIS.SHEETS.RAW).sort(function(a,b){
+    return phisNormalizeDate_(a.date).localeCompare(phisNormalizeDate_(b.date));
+  });
   if (!raw.length) return "No habit history is available yet.";
-  const analytics=phisReadObjects_(PHIS.SHEETS.ANALYTICS);
-  const memory=phisReadObjects_(PHIS.SHEETS.MEMORY);
+  const analytics=phisReadObjects_(PHIS.SHEETS.ANALYTICS).sort(function(a,b){
+    return phisNormalizeDate_(a.date).localeCompare(phisNormalizeDate_(b.date));
+  });
+  const memory=phisReadObjects_(PHIS.SHEETS.MEMORY).sort(function(a,b){
+    return phisNormalizeDate_(a.date).localeCompare(phisNormalizeDate_(b.date));
+  });
   const context={
     recent_days:raw.slice(-45),
     analytics:analytics.slice(-30),
@@ -848,6 +865,9 @@ function phisUpsertHabitAnalytics_(date,habitId,row) {
     }
   }
   sheet.appendRow(row);
+  if (sheet.getLastRow()>2) sheet.getRange(2,1,sheet.getLastRow()-1,sheet.getLastColumn()).sort([
+    {column:1,ascending:true},{column:2,ascending:true}
+  ]);
   return sheet.getLastRow();
 }
 
