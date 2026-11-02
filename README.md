@@ -48,8 +48,12 @@ Run \`setupPHISWorkbook()\` once in Apps Script. It creates and validates:
 - **MEMORY** — AI-generated summaries and scores, kept separate from measured facts.
 - **CONFIG** — targets and feature flags.
 - **AUDIT_LOG** — system actions and ingestion outcomes.
+- **HABIT_MASTER** — habit definitions, cadence, schedule and targets.
+- **HABIT_LOG** — one status per habit per date; corrections update the existing key.
+- **HABIT_ANALYTICS** — per-habit adherence, status counts and streak snapshots.
+- **DASHBOARD** — KPI cards and automatically refreshed trend charts.
 
-The data model is deliberately daily-granularity for the initial release. It is appropriate for daily summary fields and habit totals; event-level habit schedules and per-habit completion are a later schema extension, not silently inferred from a daily numerator.
+Daily measurements and subjective fields remain one summary record per date. Habit tracking has a separate Habit Master + Habit Log model, allowing per-habit analysis without inferring individual completion from aggregate daily totals. Missing scheduled logs count as not reported, not missed; skipped and missed remain distinct.
 
 ## Install
 
@@ -92,7 +96,47 @@ The data model is deliberately daily-granularity for the initial release. It is 
 }
 \`\`\`
 
-Same date + same payload is an idempotent no-op. Same date + changed payload updates that date's row. This provides one daily record per date and avoids duplicate daily captures. It is not an immutable event ledger: edits are allowed by date-level replacement and audit events record the operation.
+Same date + same payload is an idempotent no-op. Same date + changed payload updates that date's row. Individual habit events upsert by date + habit ID. The model prevents duplicate daily captures while allowing corrections. It is not an immutable event ledger: edits are allowed and audit events record the operation.
+
+### Create or update a habit
+
+POST this action to the web app (include the shared secret when configured):
+
+```json
+{
+  "action": "habit_upsert",
+  "habit": {
+    "habit_name": "Morning walk",
+    "category": "Movement",
+    "cadence": "weekdays",
+    "start_date": "2026-06-25",
+    "target_value": 20,
+    "unit": "minutes",
+    "preferred_time": "07:00"
+  }
+}
+```
+
+The response returns a stable `habit_id`. Retain that ID in the Shortcut. Supported cadence values: `daily`, `weekdays`, `weekends`, `weekly` and `custom`. For weekly/custom schedules, `schedule_days` is a comma-separated list using Sunday=0 through Saturday=6. Archive a habit with `{"action":"habit_archive","habit_id":"..."}`.
+
+### Submit per-habit statuses
+
+Include a `habits` array in the daily capture:
+
+```json
+{
+  "date": "2026-06-25",
+  "habits_done": 2,
+  "habits_total": 3,
+  "habits": [
+    {"habit_id": "YOUR_HABIT_ID", "status": "done", "value": 25, "duration_min": 25},
+    {"habit_id": "ANOTHER_HABIT_ID", "status": "partial", "value": 10, "notes": "Shortened session"},
+    {"habit_id": "THIRD_HABIT_ID", "status": "skipped", "notes": "Travel day"}
+  ]
+}
+```
+
+Valid statuses are `done`, `partial`, `skipped`, `missed` and `not_reported`. Partial completion earns half credit for adherence; streaks require `done`. A missing row for a scheduled date is counted as not reported. The daily aggregate fields remain useful for quick capture but are not used to fabricate individual habit history.
 
 ### Ask a question
 
@@ -113,7 +157,7 @@ Q&A uses a configured model provider when available. Without provider credential
 
 ## Known limitations
 
-- The initial RAW schema is one summary record per date, not a per-habit event table. Per-habit streaks require a future Habit Master + Habit Events schema.
+- The first release includes per-habit tracking and a Google Sheets dashboard, but does not include an app-native interactive web interface.
 - Apple Health collection and the iOS Shortcut are documented integration steps, not importable or installed assets in this repository.
 - Notification delivery requires Pushover credentials and is off by default.
 - AI review and Q&A require a compatible provider endpoint, API key and model.
