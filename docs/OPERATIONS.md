@@ -28,6 +28,8 @@ Config values:
 - \`DAILY_REVIEW_ENABLED\` (default false)
 - \`NOTIFICATIONS_ENABLED\` (default false)
 - target values, completion threshold, timezone and correlation sample minimum.
+- Create/update habits using the `habit_upsert` API action; archive using `habit_archive`.
+- DASHBOARD refreshes after each successful daily capture and during `runDailyJob()`.
 
 ## Daily operations
 
@@ -50,7 +52,11 @@ Config values:
 
 **No notification:** confirm NOTIFICATIONS_ENABLED is TRUE and both Pushover credentials are present. Delivery is deduplicated by date.
 
-**Duplicate daily captures:** exact same-day retries are no-ops; changed same-day payload updates the record. Check date/timezone formatting if two different dates appear.
+**Duplicate daily captures:** exact same-day retries are no-ops; changed same-day payload updates the record. Habit events upsert by date + habit ID. Check date/timezone formatting if two different dates appear.
+
+**Habit missing from analytics:** confirm its HABIT_MASTER entry, active date range and cadence. Confirm the Shortcut sends its stable habit_id. A scheduled date without a log is shown as not reported, not missed.
+
+**Dashboard stale or missing:** run `refreshPHISDashboard()` manually and verify RAW / ANALYTICS schemas.
 
 ## Release discipline
 
