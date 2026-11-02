@@ -71,6 +71,12 @@ function PHIS_RUN_ALL_PREFLIGHT_TESTS() {
       const historical=computeAnalytics("2026-01-02");
       if (historical.current_streak!==2) throw new Error("Historical streak used future rows or lost prior days");
     }));
+    results.push(phisTest_("Rolling averages use calendar windows, not last N records",function(){
+      const far=phisTestPayload_("2026-01-12"); far.steps=10000; ingestDailyRecord(far);
+      const stats=computeAnalytics("2026-01-12");
+      if (stats.rolling_averages.steps!==10000) throw new Error("Old sparse records leaked into 7-day average: "+JSON.stringify(stats.rolling_averages));
+      if (stats.week_over_week_change.steps!=="") throw new Error("WoW should be blank without a previous calendar window");
+    }));
   } finally {
     if (original) PropertiesService.getScriptProperties().setProperty("SPREADSHEET_ID",original);
     else PropertiesService.getScriptProperties().deleteProperty("SPREADSHEET_ID");
