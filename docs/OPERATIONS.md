@@ -28,7 +28,7 @@ Config values:
 - \`DAILY_REVIEW_ENABLED\` (default false)
 - \`NOTIFICATIONS_ENABLED\` (default false)
 - target values, completion threshold, timezone and correlation sample minimum.
-- Create/update habits using the `habit_upsert` API action; archive using `habit_archive`.
+- Read active habit definitions using `habit_list`; create/update using `habit_upsert`; archive using `habit_archive`. Partial upserts preserve omitted settings.
 - DASHBOARD refreshes after each successful daily capture and during `runDailyJob()`.
 
 ## Daily operations
