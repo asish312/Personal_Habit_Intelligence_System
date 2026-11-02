@@ -77,18 +77,20 @@ function doPost(e) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return phisJson_({ok: false, error: "Payload must be a JSON object"});
     }
+    if (payload.action === "health") {
+      return phisJson_({ok: true, app: "PHIS", version: PHIS.VERSION});
+    }
+    const secret = PropertiesService.getScriptProperties().getProperty("WEB_APP_SECRET");
+    if (secret && String(payload.secret || "") !== secret) {
+      return phisJson_({ok: false, error: "Unauthorized"});
+    }
     if (payload.question) {
       const answer = answerQuestion(String(payload.question));
       return phisJson_({ok: true, result: answer});
     }
-    if (payload.action === "health") {
-      return phisJson_({ok: true, app: "PHIS", version: PHIS.VERSION});
-    }
     if (payload.action === "daily_review") {
       return phisJson_({ok: true, result: runDailyReview(payload.date || "")});
     }
-    const secret = PropertiesService.getScriptProperties().getProperty("WEB_APP_SECRET");
-    if (secret && payload.secret !== secret) return phisJson_({ok: false, error: "Unauthorized"});
     const result = ingestDailyRecord(payload);
     return phisJson_({ok: true, result: result});
   } catch (err) {
@@ -218,7 +220,7 @@ function ingestDailyRecord(payload) {
       if (h === "updated_at") return new Date();
       if (h === "source") return payload.source || "shortcut";
       if (h === "payload_hash") return hash;
-      if (h === "day_type") return payload.day_type || phisDayType_(date);
+      if (h === "day_type") return phisDayType_(date);
       return payload[h] === undefined || payload[h] === null ? "" : payload[h];
     });
     const dateCol = headers.indexOf("date") + 1;
@@ -310,16 +312,24 @@ function computeAnalytics(targetDate) {
     return total && done !== null ? done/total : null;
   }
   let streak=0, longest=0, run=0;
-  for (let i=records.length-1;i>=0;i--) {
-    const rate=completion(records[i]);
-    if (rate !== null && rate >= streakThreshold) { streak++; }
-    else if (i === records.length-1 || String(records[i].date) <= date) break;
+  function dayOrdinal_(value) {
+    const normalized=phisNormalizeDate_(value);
+    const parts=normalized.split("-").map(Number);
+    return Math.floor(Date.UTC(parts[0],parts[1]-1,parts[2])/86400000);
   }
-  records.forEach(function(r){
-    const rate=completion(r);
+  // Historical queries are evaluated only through their requested date.
+  for (let i=idx;i>=0;i--) {
+    if (i < idx && dayOrdinal_(records[i+1].date)-dayOrdinal_(records[i].date)!==1) break;
+    const rate=completion(records[i]);
+    if (rate !== null && rate >= streakThreshold) streak++;
+    else break;
+  }
+  for (let i=0;i<=idx;i++) {
+    if (i>0 && dayOrdinal_(records[i].date)-dayOrdinal_(records[i-1].date)!==1) run=0;
+    const rate=completion(records[i]);
     if (rate !== null && rate >= streakThreshold) {run++; longest=Math.max(longest,run);}
     else run=0;
-  });
+  }
   const fields = [
     ["sleep_hours","sleep_avg_7d","sleep_wow_change"],
     ["steps","steps_avg_7d","steps_wow_change"],
@@ -335,11 +345,12 @@ function computeAnalytics(targetDate) {
     metric[f[2]]=(currentAvg!=="" && previousAvg!=="") ? currentAvg-previousAvg : "";
   });
   const correlations = [];
+  const recordsThroughTarget=records.slice(0,idx+1);
   const candidateInputs=["sleep_hours","steps","exercise_min","screen_min","water_l","mood","energy"];
   const outcomes=["discipline","deep_work"];
   candidateInputs.forEach(function(input){
     outcomes.forEach(function(outcome){
-      const pairs=records.filter(function(r){
+      const pairs=recordsThroughTarget.filter(function(r){
         return r.day_type===current.day_type;
       }).map(function(r){return [phisValidNumber_(r[input]),phisValidNumber_(r[outcome])];})
         .filter(function(p){return p[0]!==null && p[1]!==null;});
@@ -395,7 +406,9 @@ function phisUpsertByDate_(sheetName, date, row) {
 }
 
 function runDailyJob() {
-  const raw=phisReadObjects_(PHIS.SHEETS.RAW);
+  const raw=phisReadObjects_(PHIS.SHEETS.RAW).sort(function(a,b){
+    return phisNormalizeDate_(a.date).localeCompare(phisNormalizeDate_(b.date));
+  });
   if (!raw.length) return {ok:false, error:"No daily data"};
   const date=phisNormalizeDate_(raw[raw.length-1].date);
   const stats=computeAnalytics(date);
