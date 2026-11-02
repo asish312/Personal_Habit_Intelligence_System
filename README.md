@@ -51,7 +51,7 @@ Run \`setupPHISWorkbook()\` once in Apps Script. It creates and validates:
 - **HABIT_MASTER** — habit definitions, cadence, schedule and targets.
 - **HABIT_LOG** — one status per habit per date; corrections update the existing key.
 - **HABIT_ANALYTICS** — per-habit adherence, status counts and streak snapshots.
-- **DASHBOARD** — KPI cards and automatically refreshed trend charts.
+- **DASHBOARD** — KPI cards, per-habit status table, seven-day and week-over-week metrics, strongest supported association, and six automatically refreshed charts (completion, sleep, steps, screen time, discipline and habit adherence).
 
 Daily measurements and subjective fields remain one summary record per date. Habit tracking has a separate Habit Master + Habit Log model, allowing per-habit analysis without inferring individual completion from aggregate daily totals. Missing scheduled logs count as not reported, not missed; skipped and missed remain distinct.
 
