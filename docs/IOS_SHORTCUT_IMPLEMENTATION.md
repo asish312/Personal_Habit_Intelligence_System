@@ -32,16 +32,18 @@ Only include values actually read or explicitly entered. Do not fill unavailable
 
 1. Use **Find Health Samples** for the previous sleep interval / sleep analysis, steps, workouts, resting heart rate, HRV and body mass. Apple Health sample availability depends on device, permissions, source apps and data types.
 2. Use **Get Details of Health Samples** and aggregate only the intended local calendar day. Validate units, source and time window.
-3. Ask for manual screen-time and habit aggregate inputs. For habits, prompt for done and total, then optionally a text list of misses.
-4. Ask for discipline rating only if this is a meaningful self-report; do not infer it from Health measurements.
-5. Build a Dictionary with the JSON fields. Format the date as \`yyyy-MM-dd\` in the user's configured timezone.
-6. Use **Get Contents of URL** → POST → Request Body JSON. Add \`WEB_APP_SECRET\` in the JSON dictionary when configured.
-7. Read the JSON response. Show a success message only when \`ok=true\`; otherwise show the returned error and allow a retry.
-8. Enable an automation to run near the desired capture time. Keep a manual run path for corrections or missed automations.
+3. Ask for manual screen-time and habit aggregate inputs. The aggregate done/total values are a quick summary only.
+4. Maintain a habit selector/list from HABIT_MASTER. For every habit scheduled today, capture one explicit status: done, partial, skipped or missed. Do not convert an unanswered prompt into missed.
+5. Ask for discipline rating only if this is a meaningful self-report; do not infer it from Health measurements.
+6. Add a `habits` array with each stable `habit_id` and status. Include optional `value`, `duration_min` and `notes` when relevant.
+7. Build a Dictionary with the JSON fields. Format the date as \`yyyy-MM-dd\` in the user's configured timezone.
+8. Use **Get Contents of URL** → POST → Request Body JSON. Add \`WEB_APP_SECRET\` in the JSON dictionary when configured.
+9. Read the JSON response. Show a success message only when \`ok=true\`; otherwise show the returned error and allow a retry.
+10. Enable an automation to run near the desired capture time. Keep a manual run path for corrections or missed automations.
 
 ## Retry and idempotency
 
-The backend maintains one row per date. Retrying the exact payload is safe. A changed payload for the same date updates the day's row. Keep the returned status (created, updated, unchanged) in the Shortcut UI.
+The backend maintains one daily summary row per date and one habit status per date + habit ID. Retrying an exact payload is safe; a changed payload updates the existing key. Keep the returned daily status (created, updated, unchanged) in the Shortcut UI.
 
 ## Question mode
 
