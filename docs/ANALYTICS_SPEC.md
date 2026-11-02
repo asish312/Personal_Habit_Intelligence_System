@@ -5,7 +5,7 @@
 Recommended primary KPIs:
 - Habit completion rate (clearly labelled reported aggregate).
 - Current and longest qualifying streak.
-- 7-record rolling averages for sleep, steps, screen time and discipline.
+- 7-calendar-day rolling averages for sleep, steps, screen time and discipline.
 - Week-over-week changes.
 - Latest date with captured data and data-quality coverage.
 
