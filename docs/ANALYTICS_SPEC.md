@@ -30,4 +30,4 @@ Recommended primary KPIs:
 
 ## Current engine support
 
-The Apps Script engine persists rolling averages, aggregate completion, calendar-gap-aware daily streaks, week-over-week changes, sample-size-gated Pearson correlation and per-habit adherence snapshots. `refreshPHISDashboard()` builds a Google Sheets dashboard with KPI cards, completion trend, sleep trend and per-habit adherence chart. It runs after a successful capture and during `runDailyJob()`.
+The Apps Script engine persists seven-calendar-day rolling averages, aggregate completion, calendar-gap-aware daily streaks, week-over-week changes, sample-size-gated Pearson correlation and per-habit adherence snapshots. `refreshPHISDashboard()` builds a Google Sheets dashboard with KPI cards, a nine-column per-habit status table, seven-day average / week-over-week table, strongest supported association, and six charts: completion, sleep, steps, screen time, discipline and per-habit adherence. It runs after a successful capture and during `runDailyJob()`.
