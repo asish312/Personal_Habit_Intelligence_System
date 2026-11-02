@@ -58,7 +58,7 @@ The data model is deliberately daily-granularity for the initial release. It is 
 3. Add \`PHIS_Engine_v1.0.0.gs\` and \`PHIS_Preflight_Tests_v1.0.0.gs\`.
 4. In Apps Script Project Settings → Script Properties set \`SPREADSHEET_ID\` to the Sheet ID (optional when bound to the target workbook).
 5. Run \`setupPHISWorkbook()\` and approve the requested Google permissions.
-6. Run \`PHIS_VALIDATE_WORKBOOK\` and then \`PHIS_RUN_ALL_PREFLIGHT_TESTS()\`. Tests use a disposable synthetic spreadsheet.
+6. Run \`phisValidateWorkbook()\` and then \`PHIS_RUN_ALL_PREFLIGHT_TESTS()\`. Tests use a disposable synthetic spreadsheet.
 7. Deploy → New deployment → Web app. Execute as yourself; choose access appropriate for the Shortcut and security model. Copy the \`/exec\` URL.
 8. Set \`WEB_APP_SECRET\` if using shared-secret validation. Do not put secrets in this repository.
 9. Configure an LLM only when ready: Script Properties \`LLM_API_KEY\`, \`LLM_ENDPOINT\`; Config values \`LLM_MODEL\` and \`LLM_ENDPOINT\`. The provider endpoint must be OpenAI-compatible Chat Completions.
