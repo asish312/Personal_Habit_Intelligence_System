@@ -47,6 +47,12 @@ function PHIS_RUN_ALL_PREFLIGHT_TESTS() {
         habit_name:"Synthetic walk",category:"Movement",cadence:"daily",
         start_date:"2026-01-01",target_value:20,unit:"minutes"
       });
+      upsertHabitDefinition({habit_id:created.habit_id,category:"Updated movement"});
+      const persisted=phisGetHabitMap_()[created.habit_id];
+      if (persisted.habit_name!=="Synthetic walk" || persisted.cadence!=="daily" ||
+          Number(persisted.target_value)!==20 || persisted.category!=="Updated movement") {
+        throw new Error("Partial habit update reset an omitted setting: "+JSON.stringify(persisted));
+      }
       const day1=phisTestPayload_("2026-01-01");
       day1.habits=[{habit_id:created.habit_id,status:"done",value:25}];
       ingestDailyRecord(day1);
