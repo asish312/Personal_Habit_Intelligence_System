@@ -284,6 +284,9 @@ function ingestDailyRecord(payload) {
     if (Array.isArray(payload.habits) && payload.habits.length) {
       phisIngestHabitLogs_(date, payload.habits, payload.source || "shortcut");
     }
+    const analyticsStats=computeAnalytics(date);
+    const habitStats=computeHabitAnalytics(date);
+    refreshPHISDashboard(date,analyticsStats,habitStats);
     phisAudit_("INGEST_" + dailyStatus.toUpperCase(), date, "SUCCESS",
       "Daily record " + dailyStatus + (payload.habits && payload.habits.length ? "; habit events upserted: " + payload.habits.length : ""));
     return {status:dailyStatus, date:date, row:dailyRow};
@@ -821,7 +824,7 @@ function computeHabitAnalytics(asOfDate) {
       date,String(habit.habit_id),String(habit.habit_name),String(habit.category),
       scheduled,done,partial,skipped,missed,notReported,rate,current,longest,lastDone
     ];
-    phisUpsertByDate_(PHIS.SHEETS.HABIT_ANALYTICS,date+"|"+String(habit.habit_id),row);
+    phisUpsertHabitAnalytics_(date,String(habit.habit_id),row);
     output.push({
       habit_id:String(habit.habit_id),habit_name:String(habit.habit_name),
       scheduled_days:scheduled,done_days:done,partial_days:partial,
@@ -830,6 +833,22 @@ function computeHabitAnalytics(asOfDate) {
     });
   });
   return {date:date,habits:output};
+}
+
+function phisUpsertHabitAnalytics_(date,habitId,row) {
+  const sheet=phisSpreadsheet_().getSheetByName(PHIS.SHEETS.HABIT_ANALYTICS);
+  const last=sheet.getLastRow();
+  if (last>=2) {
+    const keys=sheet.getRange(2,1,last-1,2).getDisplayValues();
+    for (let i=keys.length-1;i>=0;i--) {
+      if (String(keys[i][0])===date && String(keys[i][1])===habitId) {
+        sheet.getRange(i+2,1,1,row.length).setValues([row]);
+        return i+2;
+      }
+    }
+  }
+  sheet.appendRow(row);
+  return sheet.getLastRow();
 }
 
 function refreshPHISDashboard(asOfDate,stats,habitStats) {
@@ -867,6 +886,7 @@ function refreshPHISDashboard(asOfDate,stats,habitStats) {
   });
   dash.getRange("A8:H8").merge().setValue("PER-HABIT ADHERENCE");
   dash.getRange("A8:H8").setBackground("#14213D").setFontColor("#FFFFFF").setFontWeight("bold");
+  let habitTableCount=0;
   if (habitData.habits.length) {
     const top=habitData.habits.slice().sort(function(a,b){
       return (b.adherence_rate||0)-(a.adherence_rate||0);
@@ -877,6 +897,7 @@ function refreshPHISDashboard(asOfDate,stats,habitStats) {
     }));
     dash.getRange(9,1,1,4).setFontWeight("bold").setBackground("#E9EFF7");
     dash.getRange(10,2,top.length,1).setNumberFormat("0.0%");
+    habitTableCount=top.length;
   } else {
     dash.getRange("A9").setValue("Add habits to HABIT_MASTER and send per-habit status events to activate this view.");
   }
@@ -901,12 +922,9 @@ function refreshPHISDashboard(asOfDate,stats,habitStats) {
       .build();
     dash.insertChart(sleepChart);
   }
-  const habitSheet=ss.getSheetByName(PHIS.SHEETS.HABIT_ANALYTICS);
-  const habitLast=habitSheet.getLastRow();
-  if (habitLast>=2) {
+  if (habitTableCount>0) {
     const habitChart=dash.newChart().asColumnChart()
-      .addRange(habitSheet.getRange(1,3,habitLast,1))
-      .addRange(habitSheet.getRange(1,11,habitLast,1))
+      .addRange(dash.getRange(9,1,habitTableCount+1,2))
       .setNumHeaders(1).setPosition(38,1,0,0)
       .setOption("title","Per-habit adherence")
       .setOption("vAxis",{viewWindow:{min:0,max:1},format:"0%"})
