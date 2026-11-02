@@ -64,7 +64,7 @@ Daily measurements and subjective fields remain one summary record per date. Hab
 5. Run \`setupPHISWorkbook()\` and approve the requested Google permissions.
 6. Run \`phisValidateWorkbook()\` and then \`PHIS_RUN_ALL_PREFLIGHT_TESTS()\`. Tests use a disposable synthetic spreadsheet.
 7. Deploy → New deployment → Web app. Execute as yourself; choose access appropriate for the Shortcut and security model. Copy the \`/exec\` URL.
-8. Set \`WEB_APP_SECRET\` if using shared-secret validation. Do not put secrets in this repository.
+8. Set a long random \`WEB_APP_SECRET\` in Script Properties before using the API. All POST operations fail closed until it is configured. Do not put secrets in this repository.
 9. Configure an LLM only when ready: Script Properties \`LLM_API_KEY\`, \`LLM_ENDPOINT\`; Config values \`LLM_MODEL\` and \`LLM_ENDPOINT\`. The provider endpoint must be OpenAI-compatible Chat Completions.
 10. Configure Pushover Script Properties \`PUSHOVER_APP_TOKEN\` and \`PUSHOVER_USER_KEY\`; set \`NOTIFICATIONS_ENABLED\` to TRUE only after testing.
 11. Run \`setupPHISTriggers()\` to install the daily 6 AM project-timezone trigger.
@@ -104,7 +104,7 @@ POST `{"action":"habit_list"}` to retrieve active habit definitions for a Shortc
 
 ### Create or update a habit
 
-POST this action to the web app (include the shared secret when configured):
+POST this action to the web app and include the configured shared secret in the JSON body:
 
 ```json
 {
@@ -154,8 +154,8 @@ Q&A uses a configured model provider when available. Without provider credential
 
 - Keep the spreadsheet private. Health and behaviour history is sensitive personal data.
 - Never commit API keys, web app secrets, push tokens, spreadsheet IDs or personal exports.
-- Set \`WEB_APP_SECRET\` and enforce a suitable access model before exposing the endpoint.
-- Apps Script web apps do not provide a general custom-header authentication mechanism through simple Shortcuts requests. The implementation supports a shared secret in the JSON payload; treat the URL and secret as credentials and rotate them if exposed.
+- Set \`WEB_APP_SECRET\` before use. All POST routes require it; only the non-sensitive GET health check is public.
+- Apps Script web apps do not provide a general custom-header authentication mechanism through simple Shortcuts requests. The implementation requires a shared secret in every POST JSON payload; the endpoint returns an error until it is configured. Treat the URL and secret as credentials and rotate them if exposed.
 - The AI provider receives only the context sent in requests. Review its retention and privacy terms before enabling it.
 - AI calorie/macronutrient estimates are uncertain and should not be treated as clinical measurements.
 
