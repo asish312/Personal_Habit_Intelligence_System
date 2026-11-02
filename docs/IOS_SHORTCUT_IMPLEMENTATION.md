@@ -33,7 +33,7 @@ Only include values actually read or explicitly entered. Do not fill unavailable
 1. Use **Find Health Samples** for the previous sleep interval / sleep analysis, steps, workouts, resting heart rate, HRV and body mass. Apple Health sample availability depends on device, permissions, source apps and data types.
 2. Use **Get Details of Health Samples** and aggregate only the intended local calendar day. Validate units, source and time window.
 3. Ask for manual screen-time and habit aggregate inputs. The aggregate done/total values are a quick summary only.
-4. Maintain a habit selector/list from HABIT_MASTER. For every habit scheduled today, capture one explicit status: done, partial, skipped or missed. Do not convert an unanswered prompt into missed.
+4. POST `{"action":"habit_list"}` to fetch active HABIT_MASTER definitions and build the habit selector. For every habit scheduled today, capture one explicit status: done, partial, skipped or missed. Do not convert an unanswered prompt into missed.
 5. Ask for discipline rating only if this is a meaningful self-report; do not infer it from Health measurements.
 6. Add a `habits` array with each stable `habit_id` and status. Include optional `value`, `duration_min` and `notes` when relevant.
 7. Build a Dictionary with the JSON fields. Format the date as \`yyyy-MM-dd\` in the user's configured timezone.
