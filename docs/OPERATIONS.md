@@ -17,7 +17,7 @@
 | Name | Required for | Notes |
 |---|---|---|
 | SPREADSHEET_ID | Standalone script | Optional for bound scripts |
-| WEB_APP_SECRET | Shared-secret request check | Use a long random value; never commit it |
+| WEB_APP_SECRET | Required for all POST routes | Use a long random value; the API fails closed until configured; never commit it |
 | LLM_API_KEY | AI review / model Q&A | Stored only in Script Properties |
 | LLM_ENDPOINT | AI review / model Q&A | OpenAI-compatible Chat Completions URL |
 | PUSHOVER_APP_TOKEN | Push notifications | Optional |
@@ -46,7 +46,7 @@ Config values:
 
 **Schema mismatch:** do not rename or reorder headers manually. Back up the workbook, compare with PHIS_Engine_v1.0.0.gs and perform a deliberate migration.
 
-**Unauthorized request:** confirm WEB_APP_SECRET is supplied in JSON and exactly matches Script Properties. If no secret is configured, the endpoint does not require it.
+**POST disabled / unauthorized:** configure WEB_APP_SECRET in Script Properties and supply the exact value in the JSON body of every POST request. Only GET health is public.
 
 **No AI review:** confirm DAILY_REVIEW_ENABLED is TRUE and LLM_ENDPOINT, LLM_API_KEY and LLM_MODEL are configured.
 
