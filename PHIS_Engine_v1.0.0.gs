@@ -682,17 +682,9 @@ function phisValidateWorkbook() {
 /* ------------------------- Habit-level intelligence ---------------------- */
 
 function upsertHabitDefinition(definition) {
-  const name=String(definition.habit_name || "").trim();
-  if (!name) throw new Error("habit_name is required");
-  const cadence=String(definition.cadence || "daily").toLowerCase();
-  if (["daily","weekdays","weekends","weekly","custom"].indexOf(cadence)<0) {
-    throw new Error("cadence must be daily, weekdays, weekends, weekly or custom");
+  if (!definition || typeof definition !== "object" || Array.isArray(definition)) {
+    throw new Error("habit must be an object");
   }
-  const scheduleDays=String(definition.schedule_days || (cadence==="weekly" ? "1" : ""));
-  if (cadence==="custom" && !scheduleDays) throw new Error("custom cadence requires schedule_days (0=Sunday ... 6=Saturday)");
-  if (scheduleDays && scheduleDays.split(",").some(function(v){
-    return !/^[0-6]$/.test(v.trim());
-  })) throw new Error("schedule_days must be comma-separated weekdays 0 through 6");
   const lock=LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -700,21 +692,50 @@ function upsertHabitDefinition(definition) {
     const id=String(definition.habit_id || Utilities.getUuid());
     const rows=phisReadObjects_(PHIS.SHEETS.HABITS);
     const existing=rows.filter(function(r){return String(r.habit_id)===id;})[0];
+    const name=String(definition.habit_name !== undefined ? definition.habit_name :
+      (existing ? existing.habit_name : "")).trim();
+    if (!name) throw new Error("habit_name is required when creating a habit");
+    const cadence=String(definition.cadence !== undefined ? definition.cadence :
+      (existing ? existing.cadence : "daily")).toLowerCase();
+    if (["daily","weekdays","weekends","weekly","custom"].indexOf(cadence)<0) {
+      throw new Error("cadence must be daily, weekdays, weekends, weekly or custom");
+    }
+    const scheduleDays=String(definition.schedule_days !== undefined ? definition.schedule_days :
+      (existing ? existing.schedule_days : (cadence==="weekly" ? "1" : "")));
+    if ((cadence==="custom" || cadence==="weekly") && !scheduleDays) {
+      throw new Error(cadence+" cadence requires schedule_days (0=Sunday ... 6=Saturday)");
+    }
+    if (scheduleDays && scheduleDays.split(",").some(function(v){
+      return !/^[0-6]$/.test(v.trim());
+    })) throw new Error("schedule_days must be comma-separated weekdays 0 through 6");
     const tz=String(phisConfig_().TIMEZONE || "Asia/Kolkata");
     const today=Utilities.formatDate(new Date(),tz,"yyyy-MM-dd");
-    const active=definition.active===undefined ? true : definition.active===true || String(definition.active).toLowerCase()==="true";
+    const active=definition.active===undefined ?
+      (existing ? String(existing.active).toLowerCase()==="true" : true) :
+      (definition.active===true || String(definition.active).toLowerCase()==="true");
     const wasActive=existing ? String(existing.active).toLowerCase()==="true" : false;
-    const endDate=definition.end_date ? phisNormalizeDate_(definition.end_date) :
-      (!active ? today : (existing && !wasActive ? "" : (existing ? existing.end_date : "")));
+    const endDate=definition.end_date!==undefined ?
+      (definition.end_date ? phisNormalizeDate_(definition.end_date) : "") :
+      (existing ? (active ? (wasActive ? existing.end_date : "") : (existing.end_date || today)) :
+        (active ? "" : today));
+    const targetValue=definition.target_value===undefined ?
+      (existing ? existing.target_value : "") :
+      (definition.target_value===null || definition.target_value==="" ? "" : Number(definition.target_value));
     const row=[
-      id,name,String(definition.category || "General"),cadence,scheduleDays,active,
-      definition.target_value===undefined ? (existing ? existing.target_value : "") : Number(definition.target_value),
-      String(definition.unit || (existing ? existing.unit : "")),String(definition.preferred_time || (existing ? existing.preferred_time : "")),
+      id,name,
+      String(definition.category !== undefined ? definition.category : (existing ? existing.category : "General")),
+      cadence,scheduleDays,active,
+      targetValue,
+      String(definition.unit !== undefined ? definition.unit : (existing ? existing.unit : "")),
+      String(definition.preferred_time !== undefined ? definition.preferred_time : (existing ? existing.preferred_time : "")),
       definition.start_date ? phisNormalizeDate_(definition.start_date) : (existing ? existing.start_date : today),
       endDate,
-      existing ? existing.created_at : new Date(),String(definition.notes || (existing ? existing.notes : ""))
+      existing ? existing.created_at : new Date(),
+      String(definition.notes !== undefined ? definition.notes : (existing ? existing.notes : ""))
     ];
-    if (row[6]!=="" && (!isFinite(row[6]) || row[6]<0)) throw new Error("target_value must be a non-negative number");
+    if (row[6]!=="" && (!isFinite(row[6]) || row[6]<0)) {
+      throw new Error("target_value must be a non-negative number");
+    }
     if (existing) {
       const index=rows.findIndex(function(r){return String(r.habit_id)===id;})+2;
       sheet.getRange(index,1,1,row.length).setValues([row]);
@@ -727,7 +748,6 @@ function upsertHabitDefinition(definition) {
     lock.releaseLock();
   }
 }
-
 function archiveHabit(habitId) {
   if (!habitId) throw new Error("habit_id is required");
   const sheet=phisSpreadsheet_().getSheetByName(PHIS.SHEETS.HABITS);
