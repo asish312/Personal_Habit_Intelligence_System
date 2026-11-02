@@ -73,6 +73,18 @@ function PHIS_RUN_ALL_PREFLIGHT_TESTS() {
       }
       const dashboard=refreshPHISDashboard("2026-01-02");
       if (!dashboard.ok || dashboard.habit_count!==1) throw new Error(JSON.stringify(dashboard));
+      if (listHabits().length!==1 || listHabits()[0].habit_id!==created.habit_id) {
+        throw new Error("Active habit catalogue did not return the created habit");
+      }
+      archiveHabit(created.habit_id);
+      if (listHabits().length!==0 || listHabits(true).length!==1) {
+        throw new Error("Habit archive/list filtering failed");
+      }
+      const afterArchive=phisTestPayload_("2099-01-01");
+      afterArchive.habits=[{habit_id:created.habit_id,status:"done"}];
+      let archivedWriteRejected=false;
+      try { ingestDailyRecord(afterArchive); } catch(e) { archivedWriteRejected=true; }
+      if (!archivedWriteRejected) throw new Error("Archived habit accepted a future event");
     }));
     results.push(phisTest_("Streaks respect calendar gaps and historical cutoffs",function(){
       const later=phisTestPayload_("2026-01-04"); ingestDailyRecord(later);
