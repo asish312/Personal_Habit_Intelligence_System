@@ -60,6 +60,27 @@ function PHIS_RUN_ALL_PREFLIGHT_TESTS() {
       if (summary.adherence_rate!==0.5 || summary.longest_streak!==1 || summary.current_streak!==0) {
         throw new Error(JSON.stringify(summary));
       }
+      const dashboard=refreshPHISDashboard("2026-01-02");
+      if (!dashboard.ok || dashboard.habit_count!==1) throw new Error(JSON.stringify(dashboard));
+    }));
+    results.push(phisTest_("Habit master, status log and per-habit analytics",function(){
+      const created=upsertHabitDefinition({
+        habit_name:"Synthetic walk",category:"Movement",cadence:"daily",
+        start_date:"2026-01-01",target_value:20,unit:"minutes"
+      });
+      const day1=phisTestPayload_("2026-01-01");
+      day1.habits=[{habit_id:created.habit_id,status:"done",value:25}];
+      ingestDailyRecord(day1);
+      const day2=phisTestPayload_("2026-01-02");
+      day2.habits=[{habit_id:created.habit_id,status:"partial",value:10}];
+      ingestDailyRecord(day2);
+      const summary=computeHabitAnalytics("2026-01-03").habits[0];
+      if (summary.scheduled_days!==3 || summary.done_days!==1 || summary.partial_days!==1 || summary.not_reported_days!==1) {
+        throw new Error(JSON.stringify(summary));
+      }
+      if (summary.adherence_rate!==0.5 || summary.longest_streak!==1 || summary.current_streak!==0) {
+        throw new Error(JSON.stringify(summary));
+      }
     }));
     results.push(phisTest_("Streaks respect calendar gaps and historical cutoffs",function(){
       const later=phisTestPayload_("2026-01-04"); ingestDailyRecord(later);
