@@ -58,3 +58,36 @@ AI output is kept in MEMORY. It must:
 - not infer health or discipline scores from one physiological metric;
 - not claim correlation proves causation;
 - label food energy/macros as estimates.
+
+
+## Habit Master and Habit Log
+
+### HABIT_MASTER
+
+Each definition has a stable \`habit_id\`, name, category, cadence, schedule days, active state, target, unit, preferred time and active date range. Supported cadence values:
+- \`daily\`: every calendar day;
+- \`weekdays\`: Monday–Friday;
+- \`weekends\`: Saturday–Sunday;
+- \`weekly\`: selected weekday(s), Monday by default;
+- \`custom\`: selected weekday(s), Sunday=0 through Saturday=6.
+
+Archiving a habit marks it inactive and records an end date. Historical records remain available.
+
+### HABIT_LOG
+
+The logical unique key is \`date + habit_id\`. A corrected event updates the existing key. Allowed statuses:
+- \`done\`: completed;
+- \`partial\`: partly completed;
+- \`skipped\`: intentionally skipped;
+- \`missed\`: scheduled but not completed;
+- \`not_reported\`: scheduled occurrence with no completion report.
+
+A missing log row for a scheduled date is also treated as not reported in analytics. It is not silently changed to missed. Optional value, target, duration and notes are retained.
+
+### Per-habit metrics
+
+- Scheduled days count dates from the habit start through the as-of date that match cadence, bounded by end date.
+- Adherence = (done days + 0.5 × partial days) / scheduled days.
+- Current and longest streak count consecutive scheduled occurrences with status \`done\`; partial, skipped, missed and not-reported occurrences break a streak.
+- Habit analytics are date-stamped snapshots keyed by \`as_of_date + habit_id\`.
+- Set the real tracking start date when defining a habit. An incorrect early start date will inflate not-reported counts.
