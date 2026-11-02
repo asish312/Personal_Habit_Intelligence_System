@@ -91,6 +91,9 @@ function doPost(e) {
     if (secret && String(payload.secret || "") !== secret) {
       return phisJson_({ok: false, error: "Unauthorized"});
     }
+    if (payload.action === "habit_list") {
+      return phisJson_({ok: true, result: listHabits(payload.include_archived === true)});
+    }
     if (payload.action === "habit_upsert") {
       return phisJson_({ok: true, result: upsertHabitDefinition(payload.habit || {})});
     }
@@ -216,6 +219,14 @@ function phisValidatePayload_(payload) {
       if (!event || typeof event !== "object" || Array.isArray(event)) throw new Error("Each habit entry must be an object");
       const id = String(event.habit_id || "").trim();
       if (!id || !known[id]) throw new Error("Unknown habit_id: " + id);
+      const definition=known[id];
+      const starts=definition.start_date ? phisNormalizeDate_(definition.start_date) : "";
+      const ends=definition.end_date ? phisNormalizeDate_(definition.end_date) : "";
+      if (starts && date<starts) throw new Error("Habit " + id + " is not active before " + starts);
+      if (ends && date>ends) throw new Error("Habit " + id + " is archived after " + ends);
+      if (String(definition.active).toLowerCase()==="false" && !ends) {
+        throw new Error("Habit " + id + " is archived");
+      }
       if (ids[id]) throw new Error("Duplicate habit_id in payload: " + id);
       ids[id] = true;
       if (["done","partial","skipped","missed","not_reported"].indexOf(String(event.status || "")) < 0) {
@@ -752,16 +763,48 @@ function upsertHabitDefinition(definition) {
 }
 function archiveHabit(habitId) {
   if (!habitId) throw new Error("habit_id is required");
-  const sheet=phisSpreadsheet_().getSheetByName(PHIS.SHEETS.HABITS);
-  const rows=phisReadObjects_(PHIS.SHEETS.HABITS);
-  const index=rows.findIndex(function(r){return String(r.habit_id)===habitId;});
-  if (index<0) throw new Error("Habit not found: "+habitId);
-  sheet.getRange(index+2,6).setValue(false);
-  sheet.getRange(index+2,11).setValue(Utilities.formatDate(new Date(),String(phisConfig_().TIMEZONE || "Asia/Kolkata"),"yyyy-MM-dd"));
-  phisAudit_("HABIT_ARCHIVE","", "SUCCESS",habitId);
-  return {habit_id:habitId,status:"archived"};
+  const lock=LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const sheet=phisSpreadsheet_().getSheetByName(PHIS.SHEETS.HABITS);
+    const rows=phisReadObjects_(PHIS.SHEETS.HABITS);
+    const index=rows.findIndex(function(r){return String(r.habit_id)===habitId;});
+    if (index<0) throw new Error("Habit not found: "+habitId);
+    const tz=String(phisConfig_().TIMEZONE || "Asia/Kolkata");
+    const today=Utilities.formatDate(new Date(),tz,"yyyy-MM-dd");
+    sheet.getRange(index+2,6).setValue(false);
+    sheet.getRange(index+2,11).setValue(today);
+    phisAudit_("HABIT_ARCHIVE",today,"SUCCESS",habitId);
+    return {habit_id:habitId,status:"archived",end_date:today};
+  } finally {
+    lock.releaseLock();
+  }
 }
 
+function listHabits(includeArchived) {
+  const rows=phisReadObjects_(PHIS.SHEETS.HABITS).filter(function(h){
+    return includeArchived || String(h.active).toLowerCase()==="true";
+  });
+  rows.sort(function(a,b){
+    const category=String(a.category||"").localeCompare(String(b.category||""));
+    return category || String(a.habit_name||"").localeCompare(String(b.habit_name||""));
+  });
+  return rows.map(function(h){
+    return {
+      habit_id:String(h.habit_id),
+      habit_name:String(h.habit_name),
+      category:String(h.category||""),
+      cadence:String(h.cadence||"daily"),
+      schedule_days:String(h.schedule_days||""),
+      active:String(h.active).toLowerCase()==="true",
+      target_value:h.target_value,
+      unit:String(h.unit||""),
+      preferred_time:String(h.preferred_time||""),
+      start_date:h.start_date ? phisNormalizeDate_(h.start_date) : "",
+      end_date:h.end_date ? phisNormalizeDate_(h.end_date) : ""
+    };
+  });
+}
 function phisGetHabitMap_() {
   const out={};
   phisReadObjects_(PHIS.SHEETS.HABITS).forEach(function(h){out[String(h.habit_id)]=h;});
