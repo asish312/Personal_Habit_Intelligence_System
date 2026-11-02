@@ -1,0 +1,24 @@
+name: PHIS source validation
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  syntax:
+    name: Apps Script syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check Apps Script engine syntax
+        run: node --check < PHIS_Engine_v1.0.0.gs
+      - name: Check preflight test syntax
+        run: node --check < PHIS_Preflight_Tests_v1.0.0.gs
