@@ -40,7 +40,7 @@ function PHIS_RUN_ALL_PREFLIGHT_TESTS() {
       const p=phisTestPayload_("2026-01-02"); ingestDailyRecord(p);
       const a=computeAnalytics("2026-01-02");
       if (a.date!=="2026-01-02" || a.completion_rate!==0.8) throw new Error(JSON.stringify(a));
-      if (phisReadObjects_(PHIS.SHEETS.ANALYTICS).length!==1) throw new Error("Analytics row missing");
+      if (phisReadObjects_(PHIS.SHEETS.ANALYTICS).length!==2) throw new Error("Expected analytics for both captured dates");
     }));
     results.push(phisTest_("Habit master, status log and per-habit analytics",function(){
       const created=upsertHabitDefinition({
