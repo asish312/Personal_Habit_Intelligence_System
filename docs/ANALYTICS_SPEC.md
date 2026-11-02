@@ -14,7 +14,7 @@ Recommended primary KPIs:
 1. **Daily pulse:** timeline of capture completeness, completion rate and selected measurements.
 2. **Consistency heatmap:** calendar cells show reported completion. Unknown days must look different from missed or zero-completion days.
 3. **Trend explorer:** selectable 7/30/90 day and yearly views for sleep, steps, screen time, exercise, mood and focus.
-4. **Habit adherence:** aggregate completion now; per-habit ranking only after a canonical per-habit event schema exists.
+4. **Habit adherence:** rank individual habits by adherence; show scheduled, done, partial, skipped, missed and not-reported counts plus current and longest streaks.
 5. **Behaviour patterns:** weekday/weekend comparison, strongest supported correlations, sample size and uncertainty.
 6. **Goal progress:** compare observations with CONFIG targets, show missing data separately.
 7. **AI review:** daily summary, wins, blockers and one practical next action. Keep original measurements visible.
@@ -30,4 +30,4 @@ Recommended primary KPIs:
 
 ## Current engine support
 
-The Apps Script engine persists rolling averages, completion rate, streaks, week-over-week changes and a sample-size-gated Pearson correlation summary. It does not itself create a finished Google Sheets chart dashboard. Charts and dashboard formatting are workbook-layer implementation work and must be validated against the live Sheet.
+The Apps Script engine persists rolling averages, aggregate completion, calendar-gap-aware daily streaks, week-over-week changes, sample-size-gated Pearson correlation and per-habit adherence snapshots. `refreshPHISDashboard()` builds a Google Sheets dashboard with KPI cards, completion trend, sleep trend and per-habit adherence chart. It runs after a successful capture and during `runDailyJob()`.
