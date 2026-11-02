@@ -72,7 +72,9 @@ function PHIS_RUN_ALL_PREFLIGHT_TESTS() {
         throw new Error(JSON.stringify(summary));
       }
       const dashboard=refreshPHISDashboard("2026-01-02");
-      if (!dashboard.ok || dashboard.habit_count!==1) throw new Error(JSON.stringify(dashboard));
+      if (!dashboard.ok || dashboard.habit_count!==1 || dashboard.charts!==6) {
+        throw new Error("Expected six dashboard charts and one tracked habit: "+JSON.stringify(dashboard));
+      }
       if (listHabits().length!==1 || listHabits()[0].habit_id!==created.habit_id) {
         throw new Error("Active habit catalogue did not return the created habit");
       }
