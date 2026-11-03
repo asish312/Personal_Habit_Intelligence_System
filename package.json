@@ -1,0 +1,8 @@
+{
+  "name": "personal-habit-intelligence-system",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "check:syntax": "node scripts/check-phis.js"
+  }
+}
